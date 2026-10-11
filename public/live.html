@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Large screen – LiveText</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #07090d; color: #fff; position: relative;
+  }
+
+  /* Berget AI-branding, vänstra hörnet */
+  #brand {
+    position: fixed; top: 3.6vh; left: 3.4vw; height: 3.9vh; width: auto;
+    opacity: .55; z-index: 5;
+  }
+
+  /* Captions – live-TV style */
+  #captions {
+    position: absolute; left: 0; right: 0; bottom: 6vh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 0 6vw; text-align: center;
+  }
+  #captions .block + .block { margin-top: 4.5vh; }   /* "mellanrummet" efter tystnad */
+  #captions p {
+    font-size: clamp(1.8rem, 3.6vw, 3.4rem); font-weight: 700; line-height: 1.3;
+    margin: .35rem 0; max-width: 75rem;
+    text-shadow: 0 2px 14px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.9);
+  }
+  #captions p.old { opacity: .45; font-weight: 600; }
+  #captions p.partial { color: #cfe0ff; opacity: .85; font-weight: 600; }
+  #captions p.speaker-start { margin-top: 3vh; }
+
+  /* Persistent QR card, for late arrivals */
+  #qrpanel {
+    position: absolute; top: 2.5vh; right: 2.5vh;
+    background: #fff; color: #1a2433; border-radius: 1rem;
+    padding: 1rem 1.2rem; text-align: center; width: 190px; display: none;
+  }
+  #qrpanel img { width: 100%; display: block; }
+  #qrpanel .code {
+    font-family: ui-monospace, monospace; font-weight: 800; font-size: 1.25rem;
+    letter-spacing: .22em; text-indent: .22em; margin-top: .55rem; color: #16488a;
+  }
+  #qrpanel .hint { font-size: .72rem; color: #5c6673; margin-top: .4rem; line-height: 1.45; }
+
+  /* Broadcaster controls – discreet, bottom right */
+  #controls {
+    position: absolute; bottom: 2vh; right: 2vw;
+    display: flex; align-items: center; gap: .6rem;
+  }
+  #toggle {
+    padding: .7rem 1.2rem; font-size: 1rem; font-weight: 600;
+    border-radius: .6rem; border: none; cursor: pointer;
+    background: #16488a; color: #fff;
+  }
+  #toggle.stop { background: #b42318; }
+  #toggle:disabled { opacity: .45; cursor: default; }
+  #level { width: 90px; height: .4rem; background: #222; border-radius: .2rem; overflow: hidden; }
+  #level > div { height: 100%; width: 0; background: #4cc38a; }
+
+  /* Discreet status, bottom left */
+  #status {
+    position: absolute; bottom: 2vh; left: 2vw; font-size: .95rem; color: #999;
+    display: flex; align-items: center; gap: .5rem; max-width: 45vw;
+  }
+  #dot { width: .6rem; height: .6rem; border-radius: 50%; background: #555; flex: none; }
+  #status.live #dot { background: #4cc38a; box-shadow: 0 0 8px #4cc38a; }
+  #status.error #dot { background: #f26d64; }
+</style>
+</head>
+<body>
+<img id="brand" src="/berget-logo.svg" alt="Berget AI">
+<div id="captions"></div>
+<div id="qrpanel">
+  <img id="qr" alt="QR code">
+  <div class="code" id="code"></div>
+  <div class="hint">Scan to read live captions<br>on your phone<br>– in your language</div>
+</div>
+<div id="status"><span id="dot"></span><span id="statustext">Connecting…</span></div>
+<div id="controls">
+  <div id="level"><div></div></div>
+  <button id="toggle" disabled>Start streaming</button>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const id = (params.get('id') || '').toUpperCase();
+const $ = (s) => document.querySelector(s);
+const captions = $('#captions'), statusEl = $('#status'), statusText = $('#statustext');
+const toggle = $('#toggle'), levelBar = document.querySelector('#level > div');
+
+const MAX_OLD_LINES = 2;
+let listenWs = null, sendWs = null, partialEl = null, blockEl = null, reconnectTimer = null;
+const speakerSeqs = new Set();
+let sourceLang = 'sv';
+let audio = null, streaming = false, senderReady = false;
+
+if (!id) {
+  setStatus('No stream specified (?id= is missing).', 'error');
+} else {
+  init();
+}
+
+async function init() {
+  const info = await fetch(`/api/sessions/${id}`).then(r => r.json()).catch(() => null);
+  if (!info || info.error) {
+    setStatus(`No stream found with the code ${id}.`, 'error');
+    return;
+  }
+  sourceLang = info.sourceLang;
+  $('#qr').src = info.listenQr;
+  $('#code').textContent = id;
+  $('#qrpanel').style.display = 'block';
+  connectListener();
+  connectBroadcaster();
+}
+
+function setStatus(text, cls = '') {
+  statusText.textContent = text;
+  statusEl.className = cls;
+}
+
+// ---- Captions in (listener websocket, source language = no translation) --
+function connectListener() {
+  clearTimeout(reconnectTimer);
+  if (listenWs) { listenWs.onclose = null; listenWs.close(); }
+  captions.innerHTML = '';
+  partialEl = null;
+  blockEl = null;
+
+  const lang = params.get('lang') || sourceLang;
+  listenWs = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws/listen?id=${id}&lang=${lang}`);
+  listenWs.onclose = () => { reconnectTimer = setTimeout(connectListener, 2000); };
+  listenWs.onerror = () => listenWs.close();
+  listenWs.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'partial') showPartial(msg.text, msg.gapBefore, msg.speaker, msg.seq);
+    if (msg.type === 'final') showFinal(msg.text, msg.gapBefore, msg.speaker, msg.seq);
+    if (msg.type === 'speaker') applySpeakerRetro(msg.seq);
+  };
+}
+
+function currentBlock() {
+  if (!blockEl || !blockEl.isConnected) {
+    blockEl = document.createElement('div');
+    blockEl.className = 'block';
+    captions.append(blockEl);
+  }
+  return blockEl;
+}
+
+function prepareLine(gapBefore, speaker, seq) {
+  const isSpeaker = !!speaker || speakerSeqs.has(seq);
+  if (speaker) speakerSeqs.add(seq);
+  if (gapBefore || isSpeaker) blockEl = null;
+  return isSpeaker;
+}
+
+function showPartial(text, gapBefore, speaker, seq) {
+  const isSpeaker = prepareLine(gapBefore, speaker, seq);
+  if (!partialEl) {
+    partialEl = document.createElement('p');
+    partialEl.className = 'partial';
+    currentBlock().append(partialEl);
+  }
+  partialEl.dataset.seq = seq;
+  partialEl.classList.toggle('speaker-start', isSpeaker);
+  partialEl.textContent = (isSpeaker ? '— ' : '') + text;
+  ageLines();
+}
+
+function showFinal(text, gapBefore, speaker, seq) {
+  const isSpeaker = prepareLine(gapBefore, speaker, seq);
+  if (partialEl) { partialEl.remove(); partialEl = null; }
+  const p = document.createElement('p');
+  p.dataset.seq = seq;
+  p.className = isSpeaker ? 'speaker-start' : '';
+  p.textContent = (isSpeaker ? '— ' : '') + text;
+  currentBlock().append(p);
+  const lines = captions.querySelectorAll('p');
+  if (lines.length > MAX_OLD_LINES + 1) lines[0].closest('div').childElementCount === 1
+    ? lines[0].closest('div').remove()
+    : lines[0].remove();
+  ageLines();
+}
+
+function applySpeakerRetro(seq) {
+  speakerSeqs.add(seq);
+  const el = captions.querySelector(`p[data-seq="${seq}"]`);
+  if (!el || el.dataset.speakerized) return;
+  el.dataset.speakerized = '1';
+  if (!el.textContent.startsWith('— ')) el.textContent = '— ' + el.textContent;
+  el.classList.add('speaker-start');
+}
+
+function ageLines() {
+  const lines = captions.querySelectorAll('p');
+  for (let i = 0; i < lines.length; i++) lines[i].classList.toggle('old', i < lines.length - 1);
+}
+
+// ---- Audio out (broadcaster websocket) ------------------------------------
+function connectBroadcaster() {
+  sendWs = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws/broadcast?id=${id}`);
+  sendWs.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'state') {
+      if (msg.state === 'ready') {
+        senderReady = true;
+        toggle.disabled = false;
+        if (!streaming) setStatus(`Ready – press “Start streaming” and talk.`);
+      } else if (msg.state === 'connecting') {
+        setStatus('Connecting to the transcription service…');
+      } else if (msg.state === 'error') {
+        senderReady = false;
+        toggle.disabled = true;
+        setStatus('Error: ' + (msg.error || 'unknown error'), 'error');
+      }
+    }
+    if (msg.type === 'error') setStatus('Error: ' + msg.message, 'error');
+  };
+  sendWs.onclose = () => {
+    senderReady = false;
+    toggle.disabled = true;
+    if (!streaming) setStatus('Connection lost – please reload the page.', 'error');
+  };
+}
+
+function toBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
+async function start() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+  });
+  const ctx = new AudioContext();
+  await ctx.audioWorklet.addModule('/pcm-worklet.js');
+  const src = ctx.createMediaStreamSource(stream);
+  const node = new AudioWorkletNode(ctx, 'pcm-resampler', {
+    processorOptions: { targetRate: 24000 },
+  });
+  src.connect(node);
+  node.port.onmessage = (ev) => {
+    if (sendWs.readyState !== WebSocket.OPEN) return;
+    sendWs.send(JSON.stringify({ type: 'audio', audio: toBase64(ev.data) }));
+    const pcm = new Int16Array(ev.data);
+    let peak = 0;
+    for (let i = 0; i < pcm.length; i += 8) peak = Math.max(peak, Math.abs(pcm[i]));
+    levelBar.style.width = Math.min(100, (peak / 32768) * 140) + '%';
+  };
+  audio = { ctx, stream, node };
+  streaming = true;
+  toggle.textContent = 'Stop streaming';
+  toggle.classList.add('stop');
+  setStatus('Streaming', 'live');
+}
+
+async function stop() {
+  if (!audio) return;
+  audio.node.disconnect();
+  audio.stream.getTracks().forEach((t) => t.stop());
+  await audio.ctx.close();
+  audio = null;
+  streaming = false;
+  levelBar.style.width = '0';
+  toggle.textContent = 'Start streaming';
+  toggle.classList.remove('stop');
+  if (senderReady) setStatus('Ready – streaming paused.');
+}
+
+toggle.addEventListener('click', () => (streaming ? stop() : start().catch((err) => {
+  setStatus('Microphone access denied: ' + err.message, 'error');
+})));
+</script>
+</body>
+</html>

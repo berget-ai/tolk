@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Captions – LiveText</title>
+<link rel="stylesheet" href="/theme.css">
+<style>
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; }
+  header {
+    display: flex; gap: .5rem; align-items: center; padding: .6rem .8rem;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0;
+  }
+  #brand { height: 1.15rem; width: auto; flex: 0 0 auto; opacity: .7; }
+  @media (prefers-color-scheme: light) { #brand { filter: invert(.8); } }
+  select { flex: 1; min-width: 0; padding: .5rem; font-size: 1rem; border-radius: .5rem; }
+  .font-btn {
+    width: 2.4rem; height: 2.4rem; border-radius: .5rem; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text); font-size: 1.1rem; cursor: pointer;
+  }
+  #room {
+    font-family: ui-monospace, monospace; color: var(--muted); font-size: .8rem;
+    letter-spacing: .15em; white-space: nowrap;
+  }
+  #captions {
+    flex: 1; overflow-y: auto; padding: 1rem; line-height: 1.45;
+    font-size: var(--cap-size, 1.5rem); font-weight: 600;
+  }
+  #captions .block { margin-bottom: .5rem; }
+  #captions .block + .block { margin-top: 1.3rem; }   /* "mellanrummet" */
+  #captions p { margin-bottom: .55rem; }
+  #captions p.old { opacity: .45; }
+  #partial { color: var(--primary); }
+  #captions p.speaker-start { margin-top: 1rem; }
+  #status {
+    padding: .4rem .8rem; font-size: .85rem; background: var(--surface);
+    color: var(--muted); border-top: 1px solid var(--border);
+  }
+  #status.live { color: var(--success); }
+  #status.error { color: var(--error); }
+</style>
+</head>
+<body>
+<header>
+  <img id="brand" src="/berget-logo.svg" alt="Berget AI">
+  <select id="lang" aria-label="Choose language"></select>
+  <span id="room" title="Room code"></span>
+  <button class="font-btn" id="smaller" aria-label="Smaller text">A−</button>
+  <button class="font-btn" id="bigger" aria-label="Bigger text">A+</button>
+</header>
+<div id="captions"></div>
+<div id="status">Connecting…</div>
+<script>
+const params = new URLSearchParams(location.search);
+const id = params.get('id');
+const $ = (s) => document.querySelector(s);
+const captions = $('#captions'), statusEl = $('#status'), langSel = $('#lang');
+
+let ws = null;
+let partialEl = null;
+let blockEl = null;
+let fontSize = 1.5;
+let reconnectTimer = null;
+const speakerSeqs = new Set();
+
+if (!id) {
+  setStatus('No stream specified.', 'error');
+} else {
+  init();
+}
+
+async function init() {
+  const info = await fetch(`/api/sessions/${id}`).then((r) => r.json()).catch(() => null);
+  if (!info || info.error) {
+    setStatus('Stream not found – check the QR code with the organizer.', 'error');
+    return;
+  }
+  for (const [code, name] of Object.entries(info.languages)) {
+    const opt = document.createElement('option');
+    opt.value = code; opt.textContent = name;
+    langSel.append(opt);
+  }
+  $('#room').textContent = id.toUpperCase();
+  langSel.value = params.get('lang') || localStorage.getItem('livetext-lang') ||
+    (info.sourceLang === 'sv' ? 'en' : 'sv');
+  applyDirection();
+  connect();
+}
+
+function setStatus(text, cls = '') {
+  statusEl.textContent = text;
+  statusEl.className = cls;
+}
+
+function applyDirection() {
+  captions.dir = ['ar', 'fa'].includes(langSel.value) ? 'rtl' : 'ltr';
+}
+
+function connect() {
+  clearTimeout(reconnectTimer);
+  if (ws) { ws.onclose = null; ws.close(); }
+  captions.innerHTML = '';
+  partialEl = null;
+  blockEl = null;
+
+  ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws/listen?id=${id}&lang=${langSel.value}`);
+  ws.onopen = () => setStatus('Connected – waiting for speech…', 'live');
+  ws.onclose = () => {
+    setStatus('Connection lost – retrying…', 'error');
+    reconnectTimer = setTimeout(connect, 2000);
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'partial') showPartial(msg.text, msg.gapBefore, msg.speaker, msg.seq);
+    if (msg.type === 'final') showFinal(msg.text, msg.gapBefore, msg.speaker, msg.seq);
+    if (msg.type === 'speaker') applySpeakerRetro(msg.seq);
+    if (msg.type === 'error') setStatus(msg.message, 'error');
+    if (msg.type === 'state' && msg.state === 'idle') setStatus('Connected – waiting for the stream to start…');
+  };
+}
+
+function currentBlock() {
+  if (!blockEl || !blockEl.isConnected) {
+    blockEl = document.createElement('div');
+    blockEl.className = 'block';
+    captions.append(blockEl);
+  }
+  return blockEl;
+}
+
+/** Ny talare markerad? Starta alltid ett nytt stycke och sätt talstreck. */
+function prepareLine(gapBefore, speaker, seq) {
+  const isSpeaker = !!speaker || speakerSeqs.has(seq);
+  if (speaker) speakerSeqs.add(seq);
+  if (gapBefore || isSpeaker) blockEl = null;
+  return isSpeaker;
+}
+
+function showPartial(text, gapBefore, speaker, seq) {
+  const isSpeaker = prepareLine(gapBefore, speaker, seq);
+  if (!partialEl) {
+    partialEl = document.createElement('p');
+    partialEl.id = 'partial';
+    currentBlock().append(partialEl);
+  }
+  partialEl.dataset.seq = seq;
+  partialEl.classList.toggle('speaker-start', isSpeaker);
+  partialEl.textContent = (isSpeaker ? '— ' : '') + text;
+  markOld();
+  scrollDown();
+}
+
+function showFinal(text, gapBefore, speaker, seq) {
+  const isSpeaker = prepareLine(gapBefore, speaker, seq);
+  if (partialEl) { partialEl.remove(); partialEl = null; }
+  const p = document.createElement('p');
+  p.dataset.seq = seq;
+  p.className = isSpeaker ? 'speaker-start' : '';
+  p.textContent = (isSpeaker ? '— ' : '') + text;
+  currentBlock().append(p);
+  while (captions.children.length > 50) captions.firstChild.remove();
+  markOld();
+  scrollDown();
+}
+
+/** Talarbytesbeslutet kom efter att raden redan visats – märk i efterhand. */
+function applySpeakerRetro(seq) {
+  speakerSeqs.add(seq);
+  const el = captions.querySelector(`p[data-seq="${seq}"]`);
+  if (!el || el.dataset.speakerized) return;
+  el.dataset.speakerized = '1';
+  if (!el.textContent.startsWith('— ')) el.textContent = '— ' + el.textContent;
+  el.classList.add('speaker-start');
+}
+
+function markOld() {
+  const lines = captions.querySelectorAll('p');
+  for (let i = 0; i < lines.length; i++) lines[i].classList.toggle('old', i < lines.length - 3);
+}
+
+function scrollDown() {
+  captions.scrollTop = captions.scrollHeight;
+}
+
+langSel.addEventListener('change', () => {
+  localStorage.setItem('livetext-lang', langSel.value);
+  applyDirection();
+  connect();
+});
+
+function setFont(delta) {
+  fontSize = Math.min(3, Math.max(0.9, fontSize + delta));
+  captions.style.setProperty('--cap-size', fontSize + 'rem');
+  localStorage.setItem('livetext-font', fontSize);
+}
+$('#bigger').addEventListener('click', () => setFont(0.2));
+$('#smaller').addEventListener('click', () => setFont(-0.2));
+if (localStorage.getItem('livetext-font')) {
+  fontSize = parseFloat(localStorage.getItem('livetext-font'));
+  setFont(0);
+}
+
+// Keep the screen on during the stream
+let wakeLock = null;
+async function keepAwake() {
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* not supported */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') keepAwake();
+});
+keepAwake();
+</script>
+</body>
+</html>

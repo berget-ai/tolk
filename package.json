@@ -1,0 +1,25 @@
+{
+  "name": "tolk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Live textning och översättning via QR-kod – byggd på Berget AI realtime-transkription",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "openai": "^6.0.0",
+    "qrcode": "^1.5.4",
+    "sherpa-onnx": "^1.13.8",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

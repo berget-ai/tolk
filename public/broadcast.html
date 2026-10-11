@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Broadcaster – LiveText</title>
+<link rel="stylesheet" href="/theme.css">
+<style>
+  body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem; }
+  main { width: 100%; max-width: 30rem; }
+  h1 { font-size: 1.5rem; margin-bottom: .5rem; }
+  h1 span { color: var(--primary); }
+  .status {
+    padding: .8rem 1rem; border-radius: .6rem; background: var(--surface);
+    border: 1px solid var(--border); margin-bottom: 1rem; line-height: 1.5;
+  }
+  .status.live { border-color: var(--success); }
+  .status.error { border-color: var(--error); }
+  button {
+    width: 100%; padding: 1rem; font-size: 1.1rem; font-weight: 600;
+    border-radius: .6rem; border: none; cursor: pointer; margin-bottom: 1rem;
+  }
+  button.stop { background: var(--error); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .meter { height: .5rem; background: var(--surface-2); border-radius: .25rem; overflow: hidden; margin-bottom: 1rem; }
+  .meter > div { height: 100%; width: 0; background: var(--success); transition: width 80ms; }
+  pre {
+    background: var(--surface); border: 1px solid var(--border); border-radius: .6rem;
+    padding: 1rem; white-space: pre-wrap; min-height: 6rem; color: var(--muted);
+    max-height: 14rem; overflow-y: auto;
+  }
+  .meta { color: var(--muted); font-size: .85rem; margin-top: 1rem; line-height: 1.5; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Live<span>Text</span> Broadcaster</h1>
+  <div id="status" class="status">Connecting…</div>
+  <div class="meter"><div id="level"></div></div>
+  <button id="toggle" class="primary" disabled>Start streaming</button>
+  <pre id="preview" aria-label="Latest transcript"></pre>
+  <p class="meta">Place this device near the speaker, or connect it to the sound
+  system. The audio is transcribed live via Berget AI and is never stored.</p>
+</main>
+<script>
+const id = new URLSearchParams(location.search).get('id');
+const $ = (s) => document.querySelector(s);
+const statusEl = $('#status'), toggle = $('#toggle'), preview = $('#preview'), level = $('#level');
+
+if (!id) {
+  setStatus('No stream specified (?id= is missing).', 'error');
+  throw new Error('no id');
+}
+
+const ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws/broadcast?id=${id}`);
+let streaming = false;
+let audio = null;
+let ready = false;
+
+function setStatus(text, cls = '') {
+  statusEl.textContent = text;
+  statusEl.className = 'status ' + cls;
+}
+
+function listenerText(n) {
+  return n === 1 ? '1 listener connected' : `${n} listeners connected`;
+}
+
+ws.onmessage = (ev) => {
+  const msg = JSON.parse(ev.data);
+  if (msg.type === 'state') {
+    if (msg.state === 'ready') {
+      ready = true;
+      toggle.disabled = false;
+      if (!streaming) setStatus(`Ready. ${listenerText(msg.listeners)}.`);
+    } else if (msg.state === 'connecting') {
+      setStatus('Connecting to the transcription service…');
+    } else if (msg.state === 'error') {
+      ready = false;
+      toggle.disabled = true;
+      setStatus('Error: ' + (msg.error || 'unknown error'), 'error');
+    } else {
+      setStatus('Waiting…');
+    }
+  }
+  if (msg.type === 'error') setStatus('Error: ' + msg.message, 'error');
+};
+ws.onclose = () => { setStatus('Connection lost – please reload the page.', 'error'); toggle.disabled = true; };
+ws.onerror = () => setStatus('Could not connect to the server.', 'error');
+
+function toBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
+async function start() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+  });
+  const ctx = new AudioContext();
+  await ctx.audioWorklet.addModule('/pcm-worklet.js');
+  const src = ctx.createMediaStreamSource(stream);
+  const node = new AudioWorkletNode(ctx, 'pcm-resampler', {
+    processorOptions: { targetRate: 24000 },
+  });
+  src.connect(node);
+  node.port.onmessage = (ev) => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'audio', audio: toBase64(ev.data) }));
+    const pcm = new Int16Array(ev.data);
+    let peak = 0;
+    for (let i = 0; i < pcm.length; i += 8) peak = Math.max(peak, Math.abs(pcm[i]));
+    level.style.width = Math.min(100, (peak / 32768) * 140) + '%';
+  };
+  audio = { ctx, stream, node };
+  streaming = true;
+  toggle.textContent = 'Stop streaming';
+  toggle.classList.remove('primary');
+  toggle.classList.add('stop');
+  setStatus('Streaming…', 'live');
+}
+
+async function stop() {
+  if (!audio) return;
+  audio.node.disconnect();
+  audio.stream.getTracks().forEach((t) => t.stop());
+  await audio.ctx.close();
+  audio = null;
+  streaming = false;
+  level.style.width = '0';
+  toggle.textContent = 'Start streaming';
+  toggle.classList.add('primary');
+  toggle.classList.remove('stop');
+  if (ready) setStatus('Ready. Streaming paused.');
+}
+
+toggle.addEventListener('click', () => (streaming ? stop() : start().catch((err) => {
+  setStatus('Microphone access denied: ' + err.message, 'error');
+})));
+
+// Raw transcript (source language) so the operator can verify quality.
+const lines = [];
+let partialLine = '';
+function renderPreview() {
+  const shown = lines.slice(-6).concat(partialLine ? ['… ' + partialLine] : []);
+  preview.textContent = shown.join('\n');
+  preview.scrollTop = preview.scrollHeight;
+}
+ws.addEventListener('message', (ev) => {
+  const msg = JSON.parse(ev.data);
+  if (msg.type === 'partial') { partialLine = (msg.speaker ? '— ' : '') + msg.text; renderPreview(); }
+  if (msg.type === 'final') {
+    if (msg.gapBefore && !msg.speaker) lines.push('');
+    lines.push((msg.speaker ? '— ' : '') + msg.text);
+    partialLine = '';
+    renderPreview();
+  }
+});
+</script>
+</body>
+</html>

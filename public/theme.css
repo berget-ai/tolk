@@ -1,0 +1,65 @@
+/* LiveText theme – calm, institutional Scandinavian design.
+   Light by default, automatic dark mode for dim venues. No external assets. */
+
+:root {
+  --bg: #f5f4f0;          /* warm paper */
+  --surface: #ffffff;
+  --surface-2: #eef0f3;
+  --border: #dcdfe5;
+  --text: #1a2433;
+  --muted: #5c6673;
+  --primary: #16488a;     /* institutional blue */
+  --primary-hover: #123c73;
+  --on-primary: #ffffff;
+  --success: #217a4b;
+  --error: #b42318;
+  --ring: rgba(22, 72, 138, 0.3);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e141d;
+    --surface: #161e2b;
+    --surface-2: #1d2735;
+    --border: #2b374a;
+    --text: #e7edf6;
+    --muted: #97a4b7;
+    --primary: #4a79d8;
+    --primary-hover: #608be0;
+    --on-primary: #ffffff;
+    --success: #4cc38a;
+    --error: #f26d64;
+    --ring: rgba(74, 121, 216, 0.4);
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; margin: 0; }
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 1px;
+}
+
+input, select {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+button.primary {
+  background: var(--primary);
+  color: var(--on-primary);
+  border: none;
+}
+button.primary:hover:not(:disabled) { background: var(--primary-hover); }
