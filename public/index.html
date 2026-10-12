@@ -16,7 +16,7 @@
   }
   .bar a { display: flex; align-self: center; }
   .bar img { height: 1.45rem; width: auto; opacity: .85; }
-  .bar h1 { font-size: 1.55rem; letter-spacing: -0.02em; color: var(--primary); }
+  .bar h1 { font-size: 1.55rem; letter-spacing: -0.02em; }
 
   /* ── Fullscreen split: READ | CAPTION ─────────────────────────── */
   .split { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
@@ -26,8 +26,6 @@
     transition: background-color .15s ease;
   }
   .half h2 { font-size: clamp(2rem, 4vw, 3.2rem); }
-  /* En accentfärg för rubrikord – Moss, som hos Berget-hero:n */
-  .half h2 span { color: var(--berget-primary); }
   .half .lead {
     color: var(--muted); font-size: 1.1rem; line-height: 1.55;
     max-width: 32rem; min-height: 3.4em; margin-top: 1.1rem;
@@ -152,7 +150,7 @@
 
 <main class="split">
   <section class="half join" id="join-half" aria-label="Live translated captions">
-    <h2><span>Live</span> translate</h2>
+    <h2>Live translate</h2>
     <p class="lead">Type the code from the event screen.</p>
     <div class="controls">
       <div class="slot">
@@ -165,7 +163,7 @@
   </section>
 
   <section class="half create" id="create-half" aria-label="Caption your event">
-    <h2><span>Caption</span> your event</h2>
+    <h2>Caption your event</h2>
     <p class="lead">Send audio in → get captions out in any language.</p>
     <div class="controls">
       <div class="slot">
