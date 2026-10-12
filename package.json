@@ -1,6 +1,6 @@
 {
   "name": "tolk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Live textning och översättning via QR-kod – byggd på Berget AI realtime-transkription",
@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@bergetai/ui": "^0.9.0",
     "openai": "^6.0.0",
     "qrcode": "^1.5.4",
     "sherpa-onnx": "^1.13.8",

@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Captions – LiveText</title>
+<title>Captions – Berget Tolk</title>
+<link rel="stylesheet" href="/berget-ui.css">
 <link rel="stylesheet" href="/theme.css">
 <style>
   html, body { height: 100%; }
@@ -21,7 +22,7 @@
     background: var(--surface-2); color: var(--text); font-size: 1.1rem; cursor: pointer;
   }
   #room {
-    font-family: ui-monospace, monospace; color: var(--muted); font-size: .8rem;
+    font-family: var(--berget-font-mono); color: var(--muted); font-size: .8rem;
     letter-spacing: .15em; white-space: nowrap;
   }
   #captions {
@@ -83,7 +84,7 @@ async function init() {
     langSel.append(opt);
   }
   $('#room').textContent = id.toUpperCase();
-  langSel.value = params.get('lang') || localStorage.getItem('livetext-lang') ||
+  langSel.value = params.get('lang') || localStorage.getItem('bergettolk-lang') ||
     (info.sourceLang === 'sv' ? 'en' : 'sv');
   applyDirection();
   connect();
@@ -186,7 +187,7 @@ function scrollDown() {
 }
 
 langSel.addEventListener('change', () => {
-  localStorage.setItem('livetext-lang', langSel.value);
+  localStorage.setItem('bergettolk-lang', langSel.value);
   applyDirection();
   connect();
 });
@@ -194,12 +195,12 @@ langSel.addEventListener('change', () => {
 function setFont(delta) {
   fontSize = Math.min(3, Math.max(0.9, fontSize + delta));
   captions.style.setProperty('--cap-size', fontSize + 'rem');
-  localStorage.setItem('livetext-font', fontSize);
+  localStorage.setItem('bergettolk-font', fontSize);
 }
 $('#bigger').addEventListener('click', () => setFont(0.2));
 $('#smaller').addEventListener('click', () => setFont(-0.2));
-if (localStorage.getItem('livetext-font')) {
-  fontSize = parseFloat(localStorage.getItem('livetext-font'));
+if (localStorage.getItem('bergettolk-font')) {
+  fontSize = parseFloat(localStorage.getItem('bergettolk-font'));
   setFont(0);
 }
 

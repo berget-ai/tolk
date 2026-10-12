@@ -1,4 +1,4 @@
-# LiveText
+# Berget Tolk
 
 Live captions for talks, conferences and weddings. The audience scans a QR code
 and gets **real-time captions in their own language** on their phone – no app,
@@ -15,15 +15,11 @@ No login – the same flow as Mentimeter:
 
 1. **The landing page** offers two paths: *Join a stream* (type the six-character
    room code) or *Start a new stream* (pick the spoken language – done).
-2. **When the room is created** you get a QR code, the room code, and two links:
-   - **Presentation screen (`/live?id=CODE`)** – the all-in-one screen for the
-     projector: captions like on live TV (large white lines at the bottom,
-     older lines faded), QR code and room code pinned in the corner, and a
-     **Start streaming** button that captures this device's microphone – so a
-     single laptop does the whole job.
-   - **Broadcaster (`/broadcast?id=CODE`)** – optional, only if the audio comes
-     from a *separate* device (e.g. a phone or mixer-connected laptop near the
-     speaker) while the presentation screen just shows captions.
+2. **Open the presentation screen (`/live?id=CODE`)** – the all-in-one screen for the
+   projector: captions like on live TV (large white lines at the bottom,
+   older lines faded), QR code and room code pinned in the corner, plus audio
+   capture straight from this device with a microphone input selector (external
+   mixers/USB sound cards work). A single laptop does the whole job.
    One session accepts a single broadcaster – the first device that connects
    claims it.
 3. **The audience** scans the QR code (or types the room code), picks a language
@@ -131,10 +127,9 @@ microphone → broadcast page (PCM 24k) ──ws──▶ server ──ws (OpenA
 | `src/transcriber.ts` | Berget realtime connection, audio pre-buffering |
 | `src/translator.ts` | Translation via Berget chat completions |
 | `public/index.html` | Mentimeter-style flow: join by room code or create a stream |
-| `public/live.html` | Large screen view – captions like on live TV, QR pinned |
-| `public/broadcast.html` | Broadcaster (microphone → PCM → WebSocket) |
+| `public/live.html` | Large screen view – captions like on live TV, QR pinned, mic → PCM → WebSocket |
 | `public/listen.html` | Audience view (language picker, captions, wake lock) |
-| `public/theme.css` | Shared theme (light/dark via `prefers-color-scheme`) |
+| `public/theme.css` | Shared theme on `@bergetai/ui` tokens (dark) |
 | `public/pcm-worklet.js` | AudioWorklet: resampling to 24 kHz mono 16-bit PCM |
 
 ## Limitations / known choices

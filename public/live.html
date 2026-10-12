@@ -3,12 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Large screen – LiveText</title>
+<title>Large screen – Berget Tolk</title>
+<link rel="stylesheet" href="/berget-ui.css">
+<link rel="stylesheet" href="/theme.css">
 <style>
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; overflow: hidden; }
   body {
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: var(--berget-font-sans);
     background: #07090d; color: #fff; position: relative;
   }
 
@@ -34,15 +36,27 @@
   #captions p.partial { color: #cfe0ff; opacity: .85; font-weight: 600; }
   #captions p.speaker-start { margin-top: 3vh; }
 
-  /* Persistent QR card, for late arrivals */
+  /* Persistent QR card, for late arrivals (closable) */
   #qrpanel {
     position: absolute; top: 2.5vh; right: 2.5vh;
     background: #fff; color: #1a2433; border-radius: 1rem;
     padding: 1rem 1.2rem; text-align: center; width: 190px; display: none;
   }
+  #qr-close {
+    position: absolute; top: .25rem; right: .45rem; border: none; background: none;
+    color: #5c6673; font-size: 1.15rem; line-height: 1; cursor: pointer; padding: .2rem;
+  }
+  #qr-close:hover { color: #1a2433; }
+  #qr-open {
+    position: absolute; top: 2.5vh; right: 2.5vh; display: none;
+    border: none; cursor: pointer; border-radius: .7rem; padding: .6rem;
+    background: rgba(255,255,255,.08); color: #fff; opacity: .45;
+  }
+  #qr-open:hover { opacity: 1; background: rgba(255,255,255,.15); }
+  #qr-open svg { display: block; width: 28px; height: 28px; }
   #qrpanel img { width: 100%; display: block; }
   #qrpanel .code {
-    font-family: ui-monospace, monospace; font-weight: 800; font-size: 1.25rem;
+    font-family: var(--berget-font-mono); font-weight: 800; font-size: 1.25rem;
     letter-spacing: .22em; text-indent: .22em; margin-top: .55rem; color: #16488a;
   }
   #qrpanel .hint { font-size: .72rem; color: #5c6673; margin-top: .4rem; line-height: 1.45; }
@@ -54,21 +68,45 @@
   }
   #toggle {
     padding: .7rem 1.2rem; font-size: 1rem; font-weight: 600;
-    border-radius: .6rem; border: none; cursor: pointer;
+    border-radius: .6rem 0 0 .6rem; border: none; cursor: pointer;
     background: #16488a; color: #fff;
   }
-  #toggle.stop { background: #b42318; }
+  #toggle.stop, #micbtn.stop { background: #b42318; }
   #toggle:disabled { opacity: .45; cursor: default; }
-  #level { width: 90px; height: .4rem; background: #222; border-radius: .2rem; overflow: hidden; }
-  #level > div { height: 100%; width: 0; background: #4cc38a; }
+  /* Split-button: source picker behind the ▾ chevron */
+  #micwrap { position: relative; display: flex; }
+  #micbtn {
+    padding: .7rem .75rem; font-size: 1rem; border: none; cursor: pointer;
+    background: #16488a; color: #fff; border-radius: 0 .6rem .6rem 0;
+    border-left: 1px solid rgba(0,0,0,.35);
+  }
+  #micbtn:hover { filter: brightness(1.15); }
+  #micmenu {
+    position: absolute; bottom: calc(100% + .6rem); right: 0; min-width: 16rem;
+    background: #10161f; border: 1px solid #333; border-radius: .7rem;
+    padding: .35rem; z-index: 10; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  }
+  #micmenu .menu-label {
+    padding: .4rem .7rem .3rem; font-size: .72rem; text-transform: uppercase;
+    letter-spacing: .08em; color: #889;
+  }
+  #micmenu button {
+    display: block; width: 100%; text-align: left; background: none; border: none;
+    color: #ddd; padding: .55rem .7rem; border-radius: .45rem; cursor: pointer; font-size: .9rem;
+  }
+  #micmenu button:hover { background: rgba(255,255,255,.08); }
+  #micmenu button.cur { color: #4cc38a; font-weight: 700; }
 
-  /* Discreet status, bottom left */
+  /* Discreet status, bottom left – the dot breathes with your voice */
   #status {
     position: absolute; bottom: 2vh; left: 2vw; font-size: .95rem; color: #999;
     display: flex; align-items: center; gap: .5rem; max-width: 45vw;
   }
-  #dot { width: .6rem; height: .6rem; border-radius: 50%; background: #555; flex: none; }
-  #status.live #dot { background: #4cc38a; box-shadow: 0 0 8px #4cc38a; }
+  #dot {
+    width: .9rem; height: .9rem; border-radius: 50%; background: #555; flex: none;
+    transition: background .2s;
+  }
+  #status.live #dot { background: #4cc38a; }
   #status.error #dot { background: #f26d64; }
 </style>
 </head>
@@ -76,27 +114,39 @@
 <img id="brand" src="/berget-logo.svg" alt="Berget AI">
 <div id="captions"></div>
 <div id="qrpanel">
+  <button id="qr-close" aria-label="Hide QR code" title="Hide QR">×</button>
   <img id="qr" alt="QR code">
   <div class="code" id="code"></div>
   <div class="hint">Scan to read live captions<br>on your phone<br>– in your language</div>
 </div>
+<button id="qr-open" aria-label="Show QR code" title="Show QR code">
+  <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2">
+    <rect x="3" y="3" width="9" height="9"/><rect x="16" y="3" width="9" height="9"/>
+    <rect x="3" y="16" width="9" height="9"/>
+    <path d="M16 16h4v4h-4zM21 16h4v4h-4zM16 21h4v4h-4zM21 21h4"/>
+  </svg>
+</button>
 <div id="status"><span id="dot"></span><span id="statustext">Connecting…</span></div>
 <div id="controls">
-  <div id="level"><div></div></div>
-  <button id="toggle" disabled>Start streaming</button>
+  <div id="micwrap">
+    <button id="toggle" disabled>Start streaming</button>
+    <button id="micbtn" aria-label="Choose microphone source" title="Choose source"
+            aria-haspopup="listbox" aria-expanded="false">▾</button>
+    <div id="micmenu" role="listbox" hidden></div>
+  </div>
 </div>
 <script>
 const params = new URLSearchParams(location.search);
 const id = (params.get('id') || '').toUpperCase();
 const $ = (s) => document.querySelector(s);
 const captions = $('#captions'), statusEl = $('#status'), statusText = $('#statustext');
-const toggle = $('#toggle'), levelBar = document.querySelector('#level > div');
+const toggle = $('#toggle'), dot = $('#dot');
 
 const MAX_OLD_LINES = 2;
 let listenWs = null, sendWs = null, partialEl = null, blockEl = null, reconnectTimer = null;
 const speakerSeqs = new Set();
 let sourceLang = 'sv';
-let audio = null, streaming = false, senderReady = false;
+let audio = null, streaming = false, senderReady = false, autoStarted = false;
 
 if (!id) {
   setStatus('No stream specified (?id= is missing).', 'error');
@@ -201,6 +251,60 @@ function ageLines() {
   for (let i = 0; i < lines.length; i++) lines[i].classList.toggle('old', i < lines.length - 1);
 }
 
+// ---- Microphone input – source menu behind the ▾ chevron -------------------
+const micBtn = $('#micbtn'), micMenu = $('#micmenu');
+let currentMic = localStorage.getItem('bergettolk-mic') || '';
+
+async function listMics() {
+  // Labels are only available after a getUserMedia grant (or persisted permission)
+  const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput');
+  let n = 1;
+  micMenu.innerHTML = '<div class="menu-label">Audio source</div>';
+  // Pre-grant browsers (e.g. Safari) return empty deviceIds – dedupe so the
+  // menu doesn't show several indistinguishable entries
+  const seen = new Set(['']);
+  const choices = [['', 'Default input'],
+    ...devs.map(d => [d.deviceId, d.label || `Microphone ${n++}`])
+      .filter(([id]) => (id ? !seen.has(id) && (seen.add(id), true) : false))];
+  for (const [value, label] of choices) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.role = 'option';
+    b.ariaSelected = value === currentMic ? 'true' : 'false';
+    b.classList.toggle('cur', value === currentMic);
+    b.addEventListener('click', () => pickMic(value));
+    micMenu.append(b);
+  }
+  // saved device may be gone – fall back to default
+  if (currentMic && !devs.some(d => d.deviceId === currentMic)) currentMic = '';
+}
+navigator.mediaDevices.addEventListener?.('devicechange', listMics);
+listMics();
+
+async function pickMic(value) {
+  currentMic = value;
+  localStorage.setItem('bergettolk-mic', value);
+  closeMenu();
+  await listMics();
+  if (!streaming) return;                    // applies on next Start
+  await stop();                              // hot-swap while live
+  await start().catch((err) => setStatus('Could not use that input: ' + err.message, 'error'));
+}
+
+function openMenu() {
+  micMenu.hidden = false;
+  micBtn.setAttribute('aria-expanded', 'true');
+}
+function closeMenu() {
+  micMenu.hidden = true;
+  micBtn.setAttribute('aria-expanded', 'false');
+}
+micBtn.addEventListener('click', () => micMenu.hidden ? openMenu() : closeMenu());
+document.addEventListener('pointerdown', (e) => {
+  if (!micMenu.hidden && !e.target.closest('#micwrap')) closeMenu();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+
 // ---- Audio out (broadcaster websocket) ------------------------------------
 function connectBroadcaster() {
   sendWs = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws/broadcast?id=${id}`);
@@ -210,7 +314,15 @@ function connectBroadcaster() {
       if (msg.state === 'ready') {
         senderReady = true;
         toggle.disabled = false;
-        if (!streaming) setStatus(`Ready – press “Start streaming” and talk.`);
+        if (!streaming) {
+          setStatus('Ready – starting audio…');
+          // One-click flow: /live was requested via BROADCAST → start right away.
+          // The only thing the user should have to do is approve the mic prompt.
+          if (!autoStarted) {
+            autoStarted = true;
+            start().catch((err) => setStatus('Microphone access denied – press Start to retry. (' + err.message + ')', 'error'));
+          }
+        }
       } else if (msg.state === 'connecting') {
         setStatus('Connecting to the transcription service…');
       } else if (msg.state === 'error') {
@@ -238,9 +350,11 @@ function toBase64(buf) {
 }
 
 async function start() {
+  const mic = currentMic ? { deviceId: { exact: currentMic } } : {};
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, ...mic },
   });
+  listMics();   // labels appear once permission exists
   const ctx = new AudioContext();
   await ctx.audioWorklet.addModule('/pcm-worklet.js');
   const src = ctx.createMediaStreamSource(stream);
@@ -251,16 +365,40 @@ async function start() {
   node.port.onmessage = (ev) => {
     if (sendWs.readyState !== WebSocket.OPEN) return;
     sendWs.send(JSON.stringify({ type: 'audio', audio: toBase64(ev.data) }));
+    // The status dot breathes with speech instead of a separate level meter
     const pcm = new Int16Array(ev.data);
     let peak = 0;
     for (let i = 0; i < pcm.length; i += 8) peak = Math.max(peak, Math.abs(pcm[i]));
-    levelBar.style.width = Math.min(100, (peak / 32768) * 140) + '%';
+    const level = Math.min(1, peak / 16000);
+    dot.style.transform = `scale(${1 + level * 0.55})`;
+    dot.style.boxShadow = `0 0 ${Math.round(5 + level * 16)}px #4cc38a`;
   };
   audio = { ctx, stream, node };
   streaming = true;
   toggle.textContent = 'Stop streaming';
   toggle.classList.add('stop');
-  setStatus('Streaming', 'live');
+  micBtn.classList.add('stop');
+
+  // Autoplay policy: an AudioContext created without a user gesture may start
+  // suspended (the worklet then never fires). Try to wake it; if the browser
+  // still refuses, one click anywhere on the screen finishes the job.
+  if (ctx.state === 'suspended') {
+    await ctx.resume().catch(() => {});
+  }
+  if (ctx.state === 'running') {
+    setStatus('Streaming', 'live');
+  } else {
+    setStatus('Microphone connected – click anywhere on the screen to enable audio…');
+    const wake = async () => {
+      const ok = await ctx.resume().then(() => true).catch(() => false);
+      if (ok && ctx.state === 'running') {
+        setStatus('Streaming', 'live');
+      } else {
+        window.addEventListener('pointerdown', wake, { once: true });
+      }
+    };
+    window.addEventListener('pointerdown', wake, { once: true });
+  }
 }
 
 async function stop() {
@@ -270,15 +408,27 @@ async function stop() {
   await audio.ctx.close();
   audio = null;
   streaming = false;
-  levelBar.style.width = '0';
+  dot.style.transform = '';
+  dot.style.boxShadow = '';
   toggle.textContent = 'Start streaming';
   toggle.classList.remove('stop');
+  micBtn.classList.remove('stop');
   if (senderReady) setStatus('Ready – streaming paused.');
 }
 
 toggle.addEventListener('click', () => (streaming ? stop() : start().catch((err) => {
   setStatus('Microphone access denied: ' + err.message, 'error');
 })));
+
+// Close/reopen the QR panel
+$('#qr-close').addEventListener('click', () => {
+  $('#qrpanel').style.display = 'none';
+  $('#qr-open').style.display = 'block';
+});
+$('#qr-open').addEventListener('click', () => {
+  $('#qrpanel').style.display = 'block';
+  $('#qr-open').style.display = 'none';
+});
 </script>
 </body>
 </html>

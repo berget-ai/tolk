@@ -1,46 +1,66 @@
-/* LiveText theme – calm, institutional Scandinavian design.
-   Light by default, automatic dark mode for dim venues. No external assets. */
+/* Berget Tolk theme – built on @bergetai/ui design tokens.
+   Dark (console aesthetic) by default, light via [data-theme="light"]
+   (set by a head script from prefers-color-scheme).
+   Fonts are self-hosted woff2 so nothing leaves our origin. */
 
-:root {
-  --bg: #f5f4f0;          /* warm paper */
-  --surface: #ffffff;
-  --surface-2: #eef0f3;
-  --border: #dcdfe5;
-  --text: #1a2433;
-  --muted: #5c6673;
-  --primary: #16488a;     /* institutional blue */
-  --primary-hover: #123c73;
-  --on-primary: #ffffff;
-  --success: #217a4b;
-  --error: #b42318;
-  --ring: rgba(22, 72, 138, 0.3);
-  color-scheme: light;
+@font-face {
+  font-family: 'DM Sans';
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/dm-sans.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2013-2014, U+2022;
+}
+@font-face {
+  font-family: 'DM Mono';
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/dm-mono.woff2') format('woff2');
+  unicode-range: U+0000-00FF;
+}
+@font-face {
+  font-family: 'Ovo';
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/ovo.woff2') format('woff2');
+  unicode-range: U+0000-00FF;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e141d;
-    --surface: #161e2b;
-    --surface-2: #1d2735;
-    --border: #2b374a;
-    --text: #e7edf6;
-    --muted: #97a4b7;
-    --primary: #4a79d8;
-    --primary-hover: #608be0;
-    --on-primary: #ffffff;
-    --success: #4cc38a;
-    --error: #f26d64;
-    --ring: rgba(74, 121, 216, 0.4);
-    color-scheme: dark;
-  }
+/* App-level aliases onto the Berget semantic tokens (see /berget-ui.css). */
+:root {
+  --bg: var(--berget-background);
+  --surface: var(--berget-surface-01);
+  --surface-2: var(--berget-surface-02);
+  --border: var(--berget-border);
+  --text: var(--berget-foreground);
+  --muted: var(--berget-muted-foreground);
+  --primary: var(--berget-primary);              /* Moss 400 CTA */
+  --primary-hover: var(--berget-primary-hover);  /* Moss 500 */
+  --on-primary: var(--berget-primary-foreground);
+  --success: var(--berget-brand-moss-400);
+  --error: var(--berget-destructive-foreground); /* Muscaria 400 */
+  --ring: var(--berget-ring);                    /* Moss 300 focus ring */
+  color-scheme: dark;
+}
+[data-theme='light'] {
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; margin: 0; }
 
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--berget-font-sans);
   background: var(--bg);
   color: var(--text);
+}
+
+/* Ovo headings, like the rest of the Berget design system */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--berget-font-serif);
+  font-weight: 400;
+}
+
+code, pre, .mono {
+  font-family: var(--berget-font-mono);
 }
 
 button:focus-visible,
@@ -54,7 +74,7 @@ a:focus-visible {
 input, select {
   background: var(--surface);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--berget-input);
 }
 
 button.primary {

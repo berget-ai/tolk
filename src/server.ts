@@ -50,20 +50,21 @@ const server = createServer(async (req, res) => {
 
   try {
     // ---- API ---------------------------------------------------------
+    // Swedish speech is the default – creating a stream is a single click,
+    // no language picker (an explicit invalid code still fails).
     if (path === '/api/sessions' && req.method === 'POST') {
       const { sourceLang } = JSON.parse((await readBody(req)) || '{}');
-      if (!isValidLanguage(sourceLang)) return json(res, 400, { error: 'Invalid source language' });
+      const lang = sourceLang === undefined ? 'sv' : sourceLang;
+      if (!isValidLanguage(lang)) return json(res, 400, { error: 'Invalid source language' });
 
-      const session = createSession(sourceLang);
+      const session = createSession(lang);
       const listenUrl = `${PUBLIC_URL}/listen?id=${session.id}`;
-      const broadcastUrl = `${PUBLIC_URL}/broadcast?id=${session.id}`;
       const qrDataUrl = await QRCode.toDataURL(listenUrl, { width: 480, margin: 2 });
-      console.log(`[${session.id}] new session, source language ${sourceLang}`);
+      console.log(`[${session.id}] new session, source language ${lang}`);
       return json(res, 201, {
         id: session.id,
-        sourceLang,
+        sourceLang: lang,
         listenUrl,
-        broadcastUrl,
         qrDataUrl,
       });
     }
@@ -93,12 +94,18 @@ const server = createServer(async (req, res) => {
       return res.end('ok');
     }
 
+    // ---- Design-system styles from @bergetai/ui -------------------------
+    if (path === '/berget-ui.css') {
+      const css = await readFile(new URL('../node_modules/@bergetai/ui/dist/styles/index.css', import.meta.url).pathname);
+      res.writeHead(200, { 'content-type': 'text/css', 'cache-control': 'public, max-age=86400' });
+      return res.end(css);
+    }
+
     // ---- Static files ------------------------------------------------
     const alias: Record<string, string> = {
       '/': '/index.html',
       '/create': '/index.html',
       '/join': '/index.html',
-      '/broadcast': '/broadcast.html',
       '/listen': '/listen.html',
       '/live': '/live.html',
     };
@@ -109,7 +116,14 @@ const server = createServer(async (req, res) => {
       return res.end();
     }
     const data = await readFile(filePath);
-    res.writeHead(200, { 'content-type': MIME[extname(filePath)] ?? 'application/octet-stream' });
+    const ext = extname(filePath);
+    // HTML + theme must always be fresh (heuristic caching bit us during dev);
+    // self-hosted woff2 fonts are fingerprint-stable → cache hard.
+    const cache = ext === '.woff2' ? 'public, max-age=604800' : 'no-cache';
+    res.writeHead(200, {
+      'content-type': MIME[ext] ?? 'application/octet-stream',
+      'cache-control': cache,
+    });
     res.end(data);
   } catch {
     res.writeHead(404);
@@ -173,6 +187,6 @@ setInterval(() => {
 }, 30 * 1000).unref();
 
 server.listen(PORT, () => {
-  console.log(`LiveText is listening on http://localhost:${PORT}`);
+  console.log(`Berget Tolk is listening on http://localhost:${PORT}`);
   console.log(`Public URL used in QR codes: ${PUBLIC_URL}`);
 });

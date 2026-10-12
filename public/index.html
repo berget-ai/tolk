@@ -3,160 +3,308 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LiveText – live captions via QR code</title>
+<title>Berget Tolk – live captions via QR code</title>
+<link rel="stylesheet" href="/berget-ui.css">
 <link rel="stylesheet" href="/theme.css">
 <style>
-  body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 3rem 1rem; }
-  #brand { position: fixed; top: 1.1rem; left: 1.2rem; height: 1.15rem; width: auto; opacity: .75; }
-  @media (prefers-color-scheme: light) { #brand { filter: invert(.8); } }
-  main { width: 100%; max-width: 28rem; display: flex; flex-direction: column; gap: 1rem; }
-  header { text-align: center; margin-bottom: 1.25rem; }
-  h1 { font-size: 2.2rem; letter-spacing: -0.02em; }
-  h1 span { color: var(--primary); }
-  .sub { color: var(--muted); margin-top: .5rem; line-height: 1.55; }
-  .card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: .9rem;
-    padding: 1.5rem; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  body { min-height: 100dvh; display: flex; flex-direction: column; }
+
+  /* ── Brand bar: Berget AI logotype + product name ─────────────── */
+  .bar {
+    display: flex; align-items: baseline; gap: .65rem;
+    padding: 1rem 1.4rem; border-bottom: 1px solid var(--border);
   }
-  h2 { font-size: 1rem; margin-bottom: 1rem; color: var(--text); }
-  .row { display: flex; gap: .6rem; }
-  input, select, button { padding: .8rem 1rem; font-size: 1rem; border-radius: .6rem; }
-  input {
-    flex: 1; min-width: 0; text-transform: uppercase; font-family: ui-monospace, monospace;
-    letter-spacing: .3em; font-weight: 700; text-align: center;
+  .bar a { display: flex; align-self: center; }
+  .bar img { height: 1.45rem; width: auto; opacity: .85; }
+  .bar h1 { font-size: 1.55rem; letter-spacing: -0.02em; color: var(--primary); }
+
+  /* ── Fullscreen split: READ | CAPTION ─────────────────────────── */
+  .split { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
+  .half {
+    display: flex; flex-direction: column; align-items: center;
+    padding: clamp(4rem, 12vh, 8rem) 2rem 2.5rem; text-align: center; cursor: pointer;
+    transition: background-color .15s ease;
   }
-  button { font-weight: 600; cursor: pointer; white-space: nowrap; }
-  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
-  button:disabled { opacity: .5; cursor: default; }
-  .full { width: 100%; }
-  label { display: block; margin-bottom: .4rem; color: var(--muted); font-size: .85rem; }
-  .note { color: var(--muted); font-size: .78rem; margin: .75rem 0 1rem; line-height: 1.5; }
-  .err { color: var(--error); font-size: .85rem; margin-top: .6rem; min-height: 1.2em; }
-  .hidden { display: none; }
-  #created { text-align: center; border-top: 3px solid var(--primary); }
-  .tag { color: var(--success); font-size: .78rem; font-weight: 700; text-transform: uppercase;
-         letter-spacing: .12em; margin-bottom: .5rem; }
-  .code { font-family: ui-monospace, monospace; font-size: 2.5rem; font-weight: 800;
-          letter-spacing: .35em; margin: .4rem 0 1rem; text-indent: .35em; }
-  #created img { width: 100%; max-width: 230px; border-radius: .6rem; background: #fff;
-                 padding: .5rem; margin-bottom: .6rem; border: 1px solid var(--border); }
-  .url { word-break: break-all; font-size: .8rem; margin-bottom: 1rem; }
-  .url a { color: var(--primary); }
-  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin-bottom: 1rem; }
-  .tiles a {
-    display: block; padding: .9rem .5rem; border-radius: .6rem; text-decoration: none;
-    background: var(--surface-2); color: var(--text); font-weight: 600; font-size: .9rem;
-    border: 1px solid var(--border);
+  .half h2 { font-size: clamp(2rem, 4vw, 3.2rem); }
+  .half h2 span { color: var(--accent); }
+  .half .lead {
+    color: var(--muted); font-size: 1.1rem; line-height: 1.55;
+    max-width: 32rem; min-height: 3.4em; margin-top: 1.1rem;
   }
-  .tiles a:hover { border-color: var(--primary); }
-  .tiles small { display: block; font-weight: 400; color: var(--muted); margin-top: .3rem; }
+
+  .join {
+    --accent: var(--berget-brand-fjord-400);
+    background:
+      radial-gradient(ellipse 75% 60% at 50% 68%, color-mix(in oklch, var(--accent) 20%, transparent), transparent 75%),
+      color-mix(in oklch, var(--accent) 5%, transparent);
+  }
+  .join:hover {
+    background:
+      radial-gradient(ellipse 78% 64% at 50% 66%, color-mix(in oklch, var(--accent) 28%, transparent), transparent 78%),
+      color-mix(in oklch, var(--accent) 8%, transparent);
+  }
+  .create {
+    --accent: var(--berget-brand-moss-400);
+    background:
+      radial-gradient(ellipse 75% 60% at 50% 68%, color-mix(in oklch, var(--accent) 22%, transparent), transparent 75%),
+      color-mix(in oklch, var(--accent) 6%, transparent);
+    border-left: 1px solid var(--border);
+  }
+  .create:hover {
+    background:
+      radial-gradient(ellipse 78% 64% at 50% 66%, color-mix(in oklch, var(--accent) 30%, transparent), transparent 78%),
+      color-mix(in oklch, var(--accent) 9%, transparent);
+    border-left: 1px solid var(--border);
+  }
+
+  /* Controls zone: identical slot above the button on both halves → aligned */
+  .controls {
+    width: min(100%, 26rem); min-height: 13rem; display: flex;
+    flex-direction: column; gap: 1.4rem; margin-top: 1.2rem;
+  }
+  .slot {
+    height: 10rem; display: flex; align-items: center; justify-content: center; width: 100%;
+  }
+  .slot svg { max-height: 100%; width: auto; }
+  #code {
+    width: 100%; box-sizing: border-box; padding: 1.2rem 1rem; font-size: 2rem;
+    border-radius: 1rem; text-transform: uppercase; font-family: var(--berget-font-mono);
+    letter-spacing: .3em; font-weight: 700; text-align: center; background: var(--bg);
+  }
+  .big-btn {
+    width: 100%; padding: 1.4rem; font-size: 1.5rem; font-weight: 800;
+    border-radius: 1rem; cursor: pointer; border: none;
+  }
+  .join .big-btn { background: var(--berget-brand-fjord-600); color: #fff; }
+  .join .big-btn:hover:not(:disabled) { background: var(--berget-brand-fjord-500); }
+  .create .big-btn {
+    background: var(--berget-brand-moss-400); color: var(--berget-brand-granite-950);
+  }
+  .create .big-btn:hover:not(:disabled) { background: var(--berget-brand-moss-500); }
+  .big-btn:disabled { opacity: .55; cursor: default; }
+  .err { color: var(--error); font-size: .95rem; min-height: 1.3em; }
+
+  /* ── Flow illustration: mic → broadcast → phones in many languages ── */
+  .flow { color: var(--accent); width: 100%; max-width: 24rem; height: auto; }
+  .flow .ring {
+    transform-box: fill-box; transform-origin: center;
+    animation: ring 2.4s ease-out infinite; opacity: 0;
+  }
+  .flow .r2 { animation-delay: .8s; }
+  .flow .r3 { animation-delay: 1.6s; }
+  @keyframes ring {
+    0% { transform: scale(.35); opacity: .8; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+  .flow .dash { animation: dash 3.5s linear infinite; }
+  @keyframes dash { to { stroke-dashoffset: -40; } }
+  .flow .bar-frag {
+    transform-box: fill-box; transform-origin: left center; transform: scaleX(0);
+    animation: barIn 6s ease-in-out infinite;
+  }
+  @keyframes barIn {
+    0%, 8% { transform: scaleX(0); opacity: 0; }
+    22%, 72% { transform: scaleX(1); opacity: .85; }
+    88%, 100% { transform: scaleX(1); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .flow .ring, .flow .dash { animation: none; }
+    .flow .ring { opacity: 0; }
+    .flow .bar-frag { animation: none; transform: scaleX(1); opacity: .75; }
+  }
+
+  /* ── One quiet trust-line at the bottom ───────────────────────── */
+  footer {
+    padding: .8rem 1.4rem; text-align: center; color: var(--muted);
+    font-size: .78rem; border-top: 1px solid var(--border);
+  }
+  footer a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+
+  @media (max-width: 52rem) {
+    .split { grid-template-columns: 1fr; }
+    .half { padding-top: 3rem; }
+    .create { border-left: none; border-top: 1px solid var(--border); }
+  }
 </style>
 </head>
 <body>
-<img id="brand" src="/berget-logo.svg" alt="Berget AI">
-<main>
-  <header>
-    <h1>Live<span>Text</span></h1>
-    <p class="sub">Real-time captions for talks and events.<br>
-    The audience scans a QR code and reads along<br>on their own phone – in their own language.</p>
-  </header>
+<header class="bar">
+  <a href="https://berget.ai" target="_blank" rel="noopener" aria-label="Berget AI">
+    <img src="/berget-symbol.svg" alt="">
+  </a>
+  <h1>Tolk</h1>
+</header>
 
-  <section class="card">
-    <h2>Join a stream</h2>
-    <div class="row">
-      <input id="code" placeholder="ABC123" maxlength="8" autocomplete="off"
-             autocapitalize="characters" spellcheck="false" aria-label="Room code">
-      <button id="join-btn" class="primary">Join</button>
+<main class="split">
+  <section class="half join" id="join-half" aria-label="Read live captions">
+    <h2><span>Read</span> captions</h2>
+    <p class="lead">Type the code from the event screen.</p>
+    <div class="controls">
+      <div class="slot">
+        <input id="code" placeholder="ABC123" maxlength="8" autocomplete="off"
+               autocapitalize="characters" inputmode="text" spellcheck="false" aria-label="Room code">
+      </div>
+      <button id="join-btn" class="big-btn">JOIN</button>
+      <p class="err" id="join-err"></p>
     </div>
-    <p class="err" id="join-err"></p>
   </section>
 
-  <section class="card">
-    <h2>Start a new stream</h2>
-    <label for="lang">The speaker is talking in</label>
-    <select id="lang" class="full"></select>
-    <p class="note" id="model-note">Speech recognition runs on Klang Pianissimo via
-    Berget AI – trained for Swedish and its dialects, processed in Sweden, never stored.</p>
-    <button id="create" class="primary full">Create stream</button>
-  </section>
+  <section class="half create" id="create-half" aria-label="Caption your event">
+    <h2><span>Caption</span> your event</h2>
+    <p class="lead">Send audio in → get captions out in any language.</p>
+    <div class="controls">
+      <div class="slot">
+        <svg class="flow" viewBox="0 0 360 148" role="img"
+           aria-label="Your voice is live-captioned on every phone in the room">
+        <!-- flow lines: mic → hub → phones -->
+        <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="3 7"
+           stroke-linecap="round" opacity=".65">
+          <path class="dash" d="M66 70 C 96 60 110 60 136 66"/>
+          <path class="dash" d="M206 62 C 224 44 240 24 260 20"/>
+          <path class="dash" d="M206 68 C 236 62 260 56 294 54"/>
+          <path class="dash" d="M206 74 C 224 90 240 100 260 104"/>
+        </g>
 
-  <section id="created" class="card hidden">
-    <p class="tag">Your stream is ready</p>
-    <p class="code" id="created-code"></p>
-    <img id="qr" alt="QR code for the caption stream">
-    <p class="url"><a id="listen-link" href="#"></a></p>
-    <div class="tiles">
-      <a id="open-live" href="#" target="_blank">Presentation screen<small>captions like on TV – and captures the audio</small></a>
-      <a id="open-broadcast" href="#">Broadcaster only<small>if the audio comes from a separate device</small></a>
+        <!-- mic with pulsing rings -->
+        <g transform="translate(42,66)" fill="none" stroke="currentColor" stroke-width="2.5"
+           stroke-linecap="round">
+          <circle class="ring r1" r="16"/>
+          <circle class="ring r2" r="16"/>
+          <circle class="ring r3" r="16"/>
+          <rect x="-8" y="-22" width="16" height="34" rx="8" fill="currentColor" stroke="none"/>
+          <path d="M-15 -1 a15 15 0 0 0 30 0"/>
+          <line x1="0" y1="14" x2="0" y2="22"/>
+          <line x1="-9" y1="22" x2="9" y2="22"/>
+        </g>
+
+        <!-- broadcast hub -->
+        <g transform="translate(182,68)" fill="none" stroke="currentColor" stroke-width="2.2"
+           stroke-linecap="round">
+          <circle r="5.5" fill="currentColor" stroke="none"/>
+          <path d="M11 -11 A15.5 15.5 0 0 1 11 11"/>
+          <path d="M-11 -11 A15.5 15.5 0 0 0 -11 11"/>
+          <path d="M18 -18 A25.5 25.5 0 0 1 18 18"/>
+          <path d="M-18 -18 A25.5 25.5 0 0 0 -18 18"/>
+        </g>
+
+        <!-- three phones fanning out, three languages -->
+        <g font-family="var(--berget-font-mono)" font-size="8" fill="currentColor">
+          <g transform="translate(262,2)">
+            <rect width="30" height="56" rx="7" fill="none" stroke="currentColor"
+                  stroke-width="1.6" opacity=".55"/>
+            <rect class="bar-frag" x="6" y="12" width="18" height="3" rx="1.5"
+                  style="animation-delay:.0s"/>
+            <rect class="bar-frag" x="6" y="20" width="14" height="3" rx="1.5"
+                  style="animation-delay:.5s"/>
+            <rect class="bar-frag" x="6" y="28" width="17" height="3" rx="1.5"
+                  style="animation-delay:1.0s"/>
+            <rect class="bar-frag" x="6" y="36" width="11" height="3" rx="1.5"
+                  style="animation-delay:1.5s"/>
+            <text x="15" y="48" text-anchor="middle" opacity=".7">SV</text>
+          </g>
+          <g transform="translate(298,40)">
+            <rect width="30" height="56" rx="7" fill="none" stroke="currentColor"
+                  stroke-width="1.6" opacity=".55"/>
+            <rect class="bar-frag" x="6" y="12" width="18" height="3" rx="1.5"
+                  style="animation-delay:2.0s"/>
+            <rect class="bar-frag" x="6" y="20" width="13" height="3" rx="1.5"
+                  style="animation-delay:2.5s"/>
+            <rect class="bar-frag" x="6" y="28" width="18" height="3" rx="1.5"
+                  style="animation-delay:3.0s"/>
+            <rect class="bar-frag" x="6" y="36" width="12" height="3" rx="1.5"
+                  style="animation-delay:3.5s"/>
+            <text x="15" y="48" text-anchor="middle" opacity=".7">EN</text>
+          </g>
+          <g transform="translate(262,78)">
+            <rect width="30" height="56" rx="7" fill="none" stroke="currentColor"
+                  stroke-width="1.6" opacity=".55"/>
+            <rect class="bar-frag" x="6" y="12" width="16" height="3" rx="1.5"
+                  style="animation-delay:4.0s"/>
+            <rect class="bar-frag" x="6" y="20" width="18" height="3" rx="1.5"
+                  style="animation-delay:4.5s"/>
+            <rect class="bar-frag" x="6" y="28" width="13" height="3" rx="1.5"
+                  style="animation-delay:5.0s"/>
+            <rect class="bar-frag" x="6" y="36" width="17" height="3" rx="1.5"
+                  style="animation-delay:5.5s"/>
+            <text x="15" y="48" text-anchor="middle" opacity=".7">ع</text>
+          </g>
+        </g>
+      </svg>
+      </div>
+      <button id="create" class="big-btn">BROADCAST</button>
+      <p class="err">&nbsp;</p>
     </div>
-    <button id="again" class="ghost full">Create another stream</button>
   </section>
 </main>
+
+<footer>This is a free demo provided by Berget AI. All data is processed under EU Law and never stored. Read more on <a href="https://berget.ai" target="_blank" rel="noopener">berget.ai</a></footer>
+
 <script>
-(async () => {
+(() => {
 const $ = (s) => document.querySelector(s);
 
-// ---- Language selection --------------------------------------------------
-const langs = await fetch('/api/languages').then(r => r.json());
-for (const [code, name] of Object.entries(langs)) {
-  const opt = document.createElement('option');
-  opt.value = code; opt.textContent = name;
-  $('#lang').append(opt);
-}
-$('#lang').value = 'sv';
-$('#lang').addEventListener('change', () => {
-  $('#model-note').textContent = $('#lang').value === 'sv'
-    ? 'Speech recognition runs on Klang Pianissimo via Berget AI – trained for Swedish and its dialects, processed in Sweden, never stored.'
-    : 'Note: klang/pianissimo is trained for Swedish. Other source languages need a different transcription model.';
+// ---- Read captions (join) -------------------------------------------------
+const codeInput = $('#code'), joinErr = $('#join-err'), joinBtn = $('#join-btn');
+let joining = false;
+
+// Clicking anywhere in the READ half focuses the code field
+$('#join-half').addEventListener('click', (e) => {
+  if (e.target.closest('input, button')) return;
+  codeInput.focus();
 });
 
-// ---- Join an existing stream ---------------------------------------------
-const codeInput = $('#code'), joinErr = $('#join-err');
 codeInput.addEventListener('input', () => {
   codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
   joinErr.textContent = '';
+  if (codeInput.value.length === 6) join();          // full code typed – go straight in
 });
 codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
-$('#join-btn').addEventListener('click', join);
+joinBtn.addEventListener('click', join);
 
 async function join() {
+  if (joining) return;
   const code = codeInput.value.trim();
   if (code.length < 4) { joinErr.textContent = 'Enter the room code (six characters).'; return; }
-  const res = await fetch(`/api/sessions/${code}`);
-  if (!res.ok) {
-    joinErr.textContent = `No stream found with the code ${code}.`;
-    return;
+  joining = true; joinBtn.disabled = true;
+  try {
+    const res = await fetch(`/api/sessions/${code}`);
+    if (!res.ok) {
+      joinErr.textContent = `No captions found with the code ${code}.`;
+      joining = false; joinBtn.disabled = false;
+      return;
+    }
+    location.href = `/listen?id=${code}`;
+  } catch {
+    joinErr.textContent = 'Connection problem – try again.';
+    joining = false; joinBtn.disabled = false;
   }
-  location.href = `/listen?id=${code}`;
 }
 
-// ---- Create a new stream -------------------------------------------------
-$('#create').addEventListener('click', async () => {
-  $('#create').disabled = true;
+// ---- Caption an event (broadcast) ------------------------------------------
+// Clicking anywhere in the CAPTION half starts it: one click → big screen.
+// The audience scans the QR code shown on the presentation screen itself.
+$('#create-half').addEventListener('click', createStream);
+
+async function createStream() {
+  const btn = $('#create');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = 'STARTING…';
   try {
     const res = await fetch('/api/sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sourceLang: $('#lang').value }),
+      body: '{}',
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Something went wrong');
-    $('#created-code').textContent = data.id;
-    $('#qr').src = data.qrDataUrl;
-    const link = $('#listen-link');
-    link.href = data.listenUrl;
-    link.textContent = data.listenUrl;
-    $('#open-broadcast').href = data.broadcastUrl;
-    $('#open-live').href = `/live?id=${data.id}`;
-    $('#created').classList.remove('hidden');
-    $('#created').scrollIntoView({ behavior: 'smooth' });
+    location.href = `/live?id=${data.id}`;
   } catch (err) {
     alert(err.message);
-  } finally {
-    $('#create').disabled = false;
+    btn.disabled = false;
+    btn.textContent = 'BROADCAST';
   }
-});
-$('#again').addEventListener('click', () => $('#created').classList.add('hidden'));
+}
 })();
 </script>
 </body>
