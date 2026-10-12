@@ -164,7 +164,7 @@
 
   <section class="half create" id="create-half" aria-label="Caption your event">
     <h2>Caption your event</h2>
-    <p class="lead">Send audio in → get captions out in any language.</p>
+    <p class="lead">Live screen with captions + QR code</p>
     <div class="controls">
       <div class="slot">
         <svg class="flow" viewBox="0 0 360 148" role="img"
@@ -244,7 +244,7 @@
         </g>
       </svg>
       </div>
-      <button id="create" class="big-btn">BROADCAST</button>
+      <button id="create" class="big-btn">START LIVE CAPTION</button>
       <p class="err">&nbsp;</p>
     </div>
   </section>
@@ -315,7 +315,7 @@ async function createStream() {
   } catch (err) {
     alert(err.message);
     btn.disabled = false;
-    btn.textContent = 'BROADCAST';
+    btn.textContent = 'START LIVE CAPTION';
   }
 }
 })();

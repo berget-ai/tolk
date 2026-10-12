@@ -130,7 +130,7 @@
 <div id="status"><span id="dot"></span><span id="statustext">Connecting…</span></div>
 <div id="controls">
   <div id="micwrap">
-    <button id="toggle" disabled>Start streaming</button>
+    <button id="toggle" disabled>Start captions</button>
     <button id="micbtn" aria-label="Choose microphone source" title="Choose source"
             aria-haspopup="listbox" aria-expanded="false">▾</button>
     <div id="micmenu" role="listbox" hidden></div>
@@ -376,7 +376,7 @@ async function start() {
   };
   audio = { ctx, stream, node };
   streaming = true;
-  toggle.textContent = 'Stop streaming';
+  toggle.textContent = 'Stop captions';
   toggle.classList.add('stop');
   micBtn.classList.add('stop');
 
@@ -411,7 +411,7 @@ async function stop() {
   streaming = false;
   dot.style.transform = '';
   dot.style.boxShadow = '';
-  toggle.textContent = 'Start streaming';
+  toggle.textContent = 'Start captions';
   toggle.classList.remove('stop');
   micBtn.classList.remove('stop');
   if (senderReady) setStatus('Ready – streaming paused.');
