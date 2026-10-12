@@ -11,7 +11,7 @@
   html, body { height: 100%; overflow: hidden; }
   body {
     font-family: var(--berget-font-sans);
-    background: #07090d; color: #fff; position: relative;
+    background: #0A0A0A; color: #fff; position: relative;  /* Night / Peak */
   }
 
   /* Berget AI-branding, vänstra hörnet */
@@ -33,20 +33,20 @@
     text-shadow: 0 2px 14px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.9);
   }
   #captions p.old { opacity: .45; font-weight: 600; }
-  #captions p.partial { color: #cfe0ff; opacity: .85; font-weight: 600; }
+  #captions p.partial { color: #fff; opacity: .7; font-weight: 600; }
   #captions p.speaker-start { margin-top: 3vh; }
 
   /* Persistent QR card, for late arrivals (closable) */
   #qrpanel {
     position: absolute; top: 2.5vh; right: 2.5vh;
-    background: #fff; color: #1a2433; border-radius: 1rem;
+    background: #fff; color: #1A1A1A; border-radius: 1rem;  /* Peak / Slate */
     padding: 1rem 1.2rem; text-align: center; width: 190px; display: none;
   }
   #qr-close {
     position: absolute; top: .25rem; right: .45rem; border: none; background: none;
-    color: #5c6673; font-size: 1.15rem; line-height: 1; cursor: pointer; padding: .2rem;
+    color: rgba(26,26,26,.45); font-size: 1.15rem; line-height: 1; cursor: pointer; padding: .2rem;
   }
-  #qr-close:hover { color: #1a2433; }
+  #qr-close:hover { color: #1A1A1A; }
   #qr-open {
     position: absolute; top: 2.5vh; right: 2.5vh; display: none;
     border: none; cursor: pointer; border-radius: .7rem; padding: .6rem;
@@ -57,9 +57,9 @@
   #qrpanel img { width: 100%; display: block; }
   #qrpanel .code {
     font-family: var(--berget-font-mono); font-weight: 800; font-size: 1.25rem;
-    letter-spacing: .22em; text-indent: .22em; margin-top: .55rem; color: #16488a;
+    letter-spacing: .22em; text-indent: .22em; margin-top: .55rem; color: #1A1A1A;
   }
-  #qrpanel .hint { font-size: .72rem; color: #5c6673; margin-top: .4rem; line-height: 1.45; }
+  #qrpanel .hint { font-size: .72rem; color: rgba(26,26,26,.6); margin-top: .4rem; line-height: 1.45; }
 
   /* Broadcaster controls – discreet, bottom right */
   #controls {
@@ -69,33 +69,34 @@
   #toggle {
     padding: .7rem 1.2rem; font-size: 1rem; font-weight: 600;
     border-radius: .6rem 0 0 .6rem; border: none; cursor: pointer;
-    background: #16488a; color: #fff;
+    background: #52B788; color: #0A0A0A;  /* Moss / Night */
   }
-  #toggle.stop, #micbtn.stop { background: #b42318; }
+  #toggle.stop, #micbtn.stop { background: #D1392E; color: #fff; }  /* Error */
   #toggle:disabled { opacity: .45; cursor: default; }
   /* Split-button: source picker behind the ▾ chevron */
   #micwrap { position: relative; display: flex; }
   #micbtn {
     padding: .7rem .75rem; font-size: 1rem; border: none; cursor: pointer;
-    background: #16488a; color: #fff; border-radius: 0 .6rem .6rem 0;
+    background: #52B788; color: #0A0A0A; border-radius: 0 .6rem .6rem 0;
     border-left: 1px solid rgba(0,0,0,.35);
   }
-  #micbtn:hover { filter: brightness(1.15); }
+  #micbtn:hover { filter: brightness(1.08); }
   #micmenu {
     position: absolute; bottom: calc(100% + .6rem); right: 0; min-width: 16rem;
-    background: #10161f; border: 1px solid #333; border-radius: .7rem;
+    background: #1A1A1A; border: 1px solid #2a2a2a; border-radius: .7rem;  /* Slate */
     padding: .35rem; z-index: 10; box-shadow: 0 8px 24px rgba(0,0,0,.5);
   }
   #micmenu .menu-label {
     padding: .4rem .7rem .3rem; font-size: .72rem; text-transform: uppercase;
-    letter-spacing: .08em; color: #889;
+    letter-spacing: .08em; color: rgba(255,255,255,.45);
   }
   #micmenu button {
     display: block; width: 100%; text-align: left; background: none; border: none;
-    color: #ddd; padding: .55rem .7rem; border-radius: .45rem; cursor: pointer; font-size: .9rem;
+    color: rgba(255,255,255,.85); padding: .55rem .7rem; border-radius: .45rem;
+    cursor: pointer; font-size: .9rem;
   }
   #micmenu button:hover { background: rgba(255,255,255,.08); }
-  #micmenu button.cur { color: #4cc38a; font-weight: 700; }
+  #micmenu button.cur { color: #52B788; font-weight: 700; }
 
   /* Discreet status, bottom left – the dot breathes with your voice */
   #status {
@@ -106,8 +107,8 @@
     width: .9rem; height: .9rem; border-radius: 50%; background: #555; flex: none;
     transition: background .2s;
   }
-  #status.live #dot { background: #4cc38a; }
-  #status.error #dot { background: #f26d64; }
+  #status.live #dot { background: #52B788; }
+  #status.error #dot { background: #D1392E; }
 </style>
 </head>
 <body>
@@ -371,7 +372,7 @@ async function start() {
     for (let i = 0; i < pcm.length; i += 8) peak = Math.max(peak, Math.abs(pcm[i]));
     const level = Math.min(1, peak / 16000);
     dot.style.transform = `scale(${1 + level * 0.55})`;
-    dot.style.boxShadow = `0 0 ${Math.round(5 + level * 16)}px #4cc38a`;
+    dot.style.boxShadow = `0 0 ${Math.round(5 + level * 16)}px #52B788`;
   };
   audio = { ctx, stream, node };
   streaming = true;

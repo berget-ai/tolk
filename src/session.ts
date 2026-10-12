@@ -6,6 +6,7 @@ import { judgeBreakPoint } from './systemone.js';
 import { diarizer, speakerChangedAroundPause } from './diarizer.js';
 import { estimatePitch, medianF0, type PitchPoint } from './pitch.js';
 import { translate } from './translator.js';
+import { cleanSegment } from './cleaner.js';
 import { Transcriber } from './transcriber.js';
 
 const HISTORY_LIMIT = 50;
@@ -411,22 +412,28 @@ export class Session {
     this.partial = '';
     for (const timer of this.partialTimers.values()) clearTimeout(timer);
     this.partialTimers.clear();
-    this.finalizeSegment(transcript);
+
+    // Renskrivningssteget sker i en seriekö: segmenten landar alltid i ordning
+    // i historiken även om rensladen avgörs (fai-open lugnar timern).
+    const seq = ++this.seq;
+    const gap = this.gapFor(seq);
+    if (gap) this.gapStartSeq = 0;
+    this.gapJudged = false; // nästa segment får en ny bedömning
+    this.finalizeChain = this.finalizeChain.then(() => this.finalizeSegment(seq, transcript, gap));
   }
+
+  private finalizeChain: Promise<void> = Promise.resolve();
 
   /**
    * Mellanrumsbeslutet (gapStartSeq) är redan taget när segmentet började –
    * här konstaterar vi bara om just detta segment inleder ett nytt stycke.
    */
-  private finalizeSegment(transcript: string): void {
-    const seq = ++this.seq;
-    const gap = this.gapFor(seq);
-    if (gap) this.gapStartSeq = 0;
-    this.gapJudged = false; // nästa segment får en ny bedömning
+  private async finalizeSegment(seq: number, transcript: string, gap: boolean): Promise<void> {
+    const text = await cleanSegment(transcript, this.sourceLang);
 
     const seg: Segment = {
       seq,
-      original: transcript,
+      original: text,
       translations: {},
       gapBefore: gap,
       speaker: this.speakerSeq === seq,
@@ -435,11 +442,11 @@ export class Session {
     if (this.history.length > HISTORY_LIMIT) this.history.shift();
 
     this.send(this.broadcaster, {
-      type: 'final', seq, text: transcript, gapBefore: gap, speaker: seg.speaker,
+      type: 'final', seq, text, gapBefore: gap, speaker: seg.speaker,
     });
     for (const lang of this.distinctLangs()) {
-      void this.translationFor(seg, lang).then((text) =>
-        this.sendToLang(lang, { type: 'final', seq, text, gapBefore: gap, speaker: seg.speaker }),
+      void this.translationFor(seg, lang).then((translated) =>
+        this.sendToLang(lang, { type: 'final', seq, text: translated, gapBefore: gap, speaker: seg.speaker }),
       );
     }
   }
