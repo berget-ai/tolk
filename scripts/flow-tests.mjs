@@ -95,6 +95,16 @@ async function main() {
     ok('fel nyckel → 401', (await post(`/api/sessions/${id}/segments`, { text: 'hej' }, 'fel-nyckel')).status === 401);
     ok('saknad text → 400', (await post(`/api/sessions/${id}/segments`, { speaker: 'X' }, KEY)).status === 400);
     ok('okänd session → 404', (await post('/api/sessions/NOSUCH/segments', { text: 'hej' }, KEY)).status === 404);
+    ok('segment >4000 tecken → 400', (await post(`/api/sessions/${id}/segments`, { text: 'x'.repeat(4001) }, KEY)).status === 400);
+    ok('insight >1000 tecken → 400', (await post(`/api/sessions/${id}/insights`, { kind: 'note', text: 'x'.repeat(1001) }, KEY)).status === 400);
+    { // trasig JSON ska ge 400, inte sväljas som 404
+      const r = await fetch(`${BASE}/api/sessions/${id}/segments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${KEY}` },
+        body: '{inte json',
+      });
+      ok('trasig JSON → 400', r.status === 400, `status ${r.status}`);
+    }
 
     // Lyssnare på källspråket (sv) – då kortsluts översättningen och testet
     // behöver varken BERGET_API_KEY eller nätverk mot api.berget.ai.

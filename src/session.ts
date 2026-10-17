@@ -353,15 +353,23 @@ export class Session {
     this.touch();
     this.broadcastState();
 
-    // Skicka historik i lyssnarens språk, i ordning.
-    const backlog = this.history.map(async (seg) => {
-      const text = await this.translationFor(seg, lang);
-      this.send(ws, {
-        type: 'final', seq: seg.seq, text,
-        gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName: seg.speakerName,
-      });
-    });
-    void Promise.all(backlog);
+    // Skicka historik i lyssnarens språk, i ordning – i begränsade batchar,
+    // så att en sen anslutning på ett nytt språk inte eldar hundratals
+    // samtidiga översättningsanrop mot den betalda API:n.
+    const BACKLOG_CONCURRENCY = 8;
+    void (async () => {
+      for (let i = 0; i < this.history.length; i += BACKLOG_CONCURRENCY) {
+        await Promise.all(
+          this.history.slice(i, i + BACKLOG_CONCURRENCY).map(async (seg) => {
+            const text = await this.translationFor(seg, lang);
+            this.send(ws, {
+              type: 'final', seq: seg.seq, text,
+              gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName: seg.speakerName,
+            });
+          }),
+        );
+      }
+    })();
 
     // Insikter översätts inte – de replayas i originals språk (se README).
     for (const i of this.insights) {
@@ -454,23 +462,30 @@ export class Session {
    */
   private async finalizeSegment(seq: number, transcript: string, gap: boolean): Promise<void> {
     const text = await cleanSegment(transcript, this.sourceLang);
-
-    const seg: Segment = {
+    this.commitSegment({
       seq,
       original: text,
       translations: {},
       gapBefore: gap,
       speaker: this.speakerSeq === seq,
-    };
+    });
+  }
+
+  /** Historik + broadcast + översättningsfläkt – delad av ljud- och textingestvägen. */
+  private commitSegment(seg: Segment): void {
     this.history.push(seg);
     if (this.history.length > HISTORY_LIMIT) this.history.shift();
 
     this.send(this.broadcaster, {
-      type: 'final', seq, text, gapBefore: gap, speaker: seg.speaker,
+      type: 'final', seq: seg.seq, text: seg.original,
+      gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName: seg.speakerName,
     });
     for (const lang of this.distinctLangs()) {
       void this.translationFor(seg, lang).then((translated) =>
-        this.sendToLang(lang, { type: 'final', seq, text: translated, gapBefore: gap, speaker: seg.speaker }),
+        this.sendToLang(lang, {
+          type: 'final', seq: seg.seq, text: translated,
+          gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName: seg.speakerName,
+        }),
       );
     }
   }
@@ -501,27 +516,14 @@ export class Session {
     speakerChanged: boolean,
     speakerName?: string,
   ): Promise<void> {
-    const seg: Segment = {
+    this.commitSegment({
       seq,
       original: text,
       translations: {},
       gapBefore: speakerChanged,
       speaker: speakerChanged,
       speakerName,
-    };
-    this.history.push(seg);
-    if (this.history.length > HISTORY_LIMIT) this.history.shift();
-
-    this.send(this.broadcaster, {
-      type: 'final', seq, text, gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName,
     });
-    for (const lang of this.distinctLangs()) {
-      void this.translationFor(seg, lang).then((translated) =>
-        this.sendToLang(lang, {
-          type: 'final', seq, text: translated, gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName,
-        }),
-      );
-    }
   }
 
   /**
