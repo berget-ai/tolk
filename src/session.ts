@@ -9,7 +9,8 @@ import { translate } from './translator.js';
 import { cleanSegment } from './cleaner.js';
 import { Transcriber } from './transcriber.js';
 
-const HISTORY_LIMIT = 50;
+const HISTORY_LIMIT = 500; // möten via textingest genererar långt fler segment än mic-flödet
+const INSIGHTS_LIMIT = 100;
 const PARTIAL_THROTTLE_MS = 1000;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const IDLE_TTL_MS = 15 * 60 * 1000;
@@ -32,6 +33,16 @@ interface Segment {
   translations: Record<string, string>;
   gapBefore: boolean;
   speaker: boolean;
+  speakerName?: string; // sätts av textingest (mötesbot) – mic-flödet känner inga namn
+}
+
+export type InsightKind = 'agenda' | 'action' | 'decision' | 'note';
+
+interface Insight {
+  key: string;
+  kind: InsightKind;
+  text: string;
+  at: number;
 }
 
 interface AudioChunk {
@@ -70,6 +81,11 @@ export class Session {
   private seq = 0;
   private partial = '';
   private partialTimers = new Map<string, NodeJS.Timeout>();
+  // Textingest (mötesbot): senaste talarnamnet för byte-detektering
+  private lastSpeakerName: string | undefined;
+  // Insikter (agenda/åtgärder/beslut) – upsert på key, replay till nya lyssnare
+  private insights: Insight[] = [];
+  private insightSeq = 0;
 
   // Tystnadsmätning (räknas på inkommande PCM-chunkar)
   private silenceMs = 0;
@@ -340,9 +356,17 @@ export class Session {
     // Skicka historik i lyssnarens språk, i ordning.
     const backlog = this.history.map(async (seg) => {
       const text = await this.translationFor(seg, lang);
-      this.send(ws, { type: 'final', seq: seg.seq, text, gapBefore: seg.gapBefore, speaker: seg.speaker });
+      this.send(ws, {
+        type: 'final', seq: seg.seq, text,
+        gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName: seg.speakerName,
+      });
     });
     void Promise.all(backlog);
+
+    // Insikter översätts inte – de replayas i originals språk (se README).
+    for (const i of this.insights) {
+      this.send(ws, { type: 'insight', key: i.key, kind: i.kind, text: i.text, at: i.at });
+    }
 
     const current = this.partial;
     if (current) {
@@ -449,6 +473,78 @@ export class Session {
         this.sendToLang(lang, { type: 'final', seq, text: translated, gapBefore: gap, speaker: seg.speaker }),
       );
     }
+  }
+
+  // ---- Textingest (extern producent, t.ex. mötesbotten) ------------------
+
+  /**
+   * Ett färdigt talartal från extern källa. Hoppar över ljudpipan (VAD,
+   * rensning, diarization) men delar historik, seq-rymd och översättnings-
+   * fläkt med ljudflödet. Talarnamnet är känt vid ingest, så inga
+   * retroaktiva speaker-event behövs – bytet markeras direkt på segmentet.
+   */
+  ingestTextSegment(text: string, speakerName?: string): void {
+    this.touch();
+    const seq = ++this.seq;
+    const speakerChanged = speakerName !== undefined && speakerName !== this.lastSpeakerName;
+    if (speakerName !== undefined) this.lastSpeakerName = speakerName;
+    // Samma regel som akustiskt talarbyte: ny talare inleder alltid nytt stycke.
+    // Seriekön delas med ljudflödet så segmenten aldrig blandar ordning.
+    this.finalizeChain = this.finalizeChain.then(() =>
+      this.finalizeIngestedSegment(seq, text, speakerChanged, speakerName),
+    );
+  }
+
+  private async finalizeIngestedSegment(
+    seq: number,
+    text: string,
+    speakerChanged: boolean,
+    speakerName?: string,
+  ): Promise<void> {
+    const seg: Segment = {
+      seq,
+      original: text,
+      translations: {},
+      gapBefore: speakerChanged,
+      speaker: speakerChanged,
+      speakerName,
+    };
+    this.history.push(seg);
+    if (this.history.length > HISTORY_LIMIT) this.history.shift();
+
+    this.send(this.broadcaster, {
+      type: 'final', seq, text, gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName,
+    });
+    for (const lang of this.distinctLangs()) {
+      void this.translationFor(seg, lang).then((translated) =>
+        this.sendToLang(lang, {
+          type: 'final', seq, text: translated, gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName,
+        }),
+      );
+    }
+  }
+
+  /**
+   * Lägger till en insikt, eller ersätter befintlig om samma key skickas
+   * (rullande uppdateringar från producenten spammar inte panelen).
+   * Sänds till alla + sparas för replay till sen anslutna lyssnare.
+   */
+  upsertInsight(kind: InsightKind, text: string, key?: string): Insight {
+    this.touch();
+    let insight = key ? this.insights.find((i) => i.key === key) : undefined;
+    if (insight) {
+      insight.kind = kind;
+      insight.text = text;
+      insight.at = Date.now();
+    } else {
+      insight = { key: key ?? `i${++this.insightSeq}`, kind, text, at: Date.now() };
+      this.insights.push(insight);
+      if (this.insights.length > INSIGHTS_LIMIT) this.insights.shift();
+    }
+    const msg = { type: 'insight', key: insight.key, kind: insight.kind, text: insight.text, at: insight.at };
+    this.send(this.broadcaster, msg);
+    for (const ws of this.listeners.keys()) this.send(ws, msg);
+    return insight;
   }
 
   private async translationFor(seg: Segment, lang: string): Promise<string> {

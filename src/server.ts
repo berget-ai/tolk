@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { loadEnvFile } from 'node:process';
@@ -7,7 +8,7 @@ import QRCode from 'qrcode';
 import { WebSocketServer, WebSocket as WsWebSocket } from 'ws';
 
 import { isValidLanguage, LANGUAGES } from './languages.js';
-import { createSession, getSession } from './session.js';
+import { createSession, getSession, type InsightKind } from './session.js';
 
 try {
   loadEnvFile();
@@ -43,6 +44,19 @@ async function readBody(req: IncomingMessage): Promise<string> {
   for await (const chunk of req) body += chunk;
   return body;
 }
+
+// Ingest-endpunkterna (mötesboten pushar text + insikter) skyddas med en
+// dedikerad nyckel – ALDRIG BERGET_API_KEY, som är en faktureringsnyckel och
+// används av translator/cleaner/systemone i samma process.
+const INGEST_API_KEY = process.env.INGEST_API_KEY ?? '';
+
+function validIngestKey(req: IncomingMessage): boolean {
+  const presented = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
+  if (!INGEST_API_KEY || presented.length !== INGEST_API_KEY.length) return false;
+  return timingSafeEqual(Buffer.from(presented), Buffer.from(INGEST_API_KEY));
+}
+
+const INSIGHT_KINDS: InsightKind[] = ['agenda', 'action', 'decision', 'note'];
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
@@ -87,6 +101,39 @@ const server = createServer(async (req, res) => {
 
     if (path === '/api/languages' && req.method === 'GET') {
       return json(res, 200, LANGUAGES);
+    }
+
+    // ---- Ingest: färdigtranskriberad text + insikter från extern producent --
+    // Osatt INGEST_API_KEY = funktionen avstängd och osynlig (404).
+    const ingestMatch = path.match(/^\/api\/sessions\/([\w-]+)\/(segments|insights)$/);
+    if (ingestMatch && req.method === 'POST') {
+      if (!INGEST_API_KEY) return json(res, 404, { error: 'Not found' });
+      if (!validIngestKey(req)) return json(res, 401, { error: 'Unauthorized' });
+      const session = getSession(ingestMatch[1]);
+      if (!session) return json(res, 404, { error: 'Stream not found' });
+      const body = JSON.parse((await readBody(req)) || '{}');
+
+      if (ingestMatch[2] === 'segments') {
+        const text = typeof body.text === 'string' ? body.text.trim() : '';
+        if (!text) return json(res, 400, { error: 'text is required' });
+        if (text.length > 4000) return json(res, 400, { error: 'text too long (max 4000)' });
+        const speaker =
+          typeof body.speaker === 'string' && body.speaker.trim()
+            ? body.speaker.trim().slice(0, 80)
+            : undefined;
+        session.ingestTextSegment(text, speaker);
+        return json(res, 202, { ok: true });
+      }
+
+      // /insights – kind faller tillbaka på 'note', key ger upsert-semantik
+      const text = typeof body.text === 'string' ? body.text.trim() : '';
+      if (!text) return json(res, 400, { error: 'text is required' });
+      if (text.length > 1000) return json(res, 400, { error: 'text too long (max 1000)' });
+      const kind: InsightKind = INSIGHT_KINDS.includes(body.kind) ? body.kind : 'note';
+      const key =
+        typeof body.key === 'string' && body.key.trim() ? body.key.trim().slice(0, 80) : undefined;
+      const insight = session.upsertInsight(kind, text, key);
+      return json(res, 202, { ok: true, key: insight.key });
     }
 
     if (path === '/healthz') {

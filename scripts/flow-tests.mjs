@@ -77,6 +77,71 @@ async function main() {
     b3.close();
   }
 
+  console.log(`\n— Ingest (INGEST_API_KEY ${process.env.INGEST_API_KEY ? 'satt' : 'osatt'}) —`);
+  const KEY = process.env.INGEST_API_KEY;
+  const post = (p, body, key) => fetch(`${BASE}${p}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+    body: JSON.stringify(body),
+  });
+
+  if (!KEY) {
+    const r = await post(`/api/sessions/${id}/segments`, { text: 'hej' });
+    ok('ingest avstängd utan nyckel → 404', r.status === 404, `status ${r.status}`);
+    const r2 = await post(`/api/sessions/${id}/insights`, { kind: 'note', text: 'hej' });
+    ok('insights avstängt utan nyckel → 404', r2.status === 404, `status ${r2.status}`);
+  } else {
+    ok('saknad auth → 401', (await post(`/api/sessions/${id}/segments`, { text: 'hej' })).status === 401);
+    ok('fel nyckel → 401', (await post(`/api/sessions/${id}/segments`, { text: 'hej' }, 'fel-nyckel')).status === 401);
+    ok('saknad text → 400', (await post(`/api/sessions/${id}/segments`, { speaker: 'X' }, KEY)).status === 400);
+    ok('okänd session → 404', (await post('/api/sessions/NOSUCH/segments', { text: 'hej' }, KEY)).status === 404);
+
+    // Lyssnare på källspråket (sv) – då kortsluts översättningen och testet
+    // behöver varken BERGET_API_KEY eller nätverk mot api.berget.ai.
+    const lw = await open(`${WS_BASE}/ws/listen?id=${id}&lang=sv`);
+
+    const seg1P = waiter(lw, m => m.type === 'final' && m.speakerName === 'Magnus', 4000);
+    const rSeg = await post(`/api/sessions/${id}/segments`, { speaker: 'Magnus', text: 'Vi börjar med budgeten.' }, KEY);
+    ok('segment ingest → 202', rSeg.status === 202, `status ${rSeg.status}`);
+    const seg1 = await seg1P;
+    ok('lyssnare fick final med speakerName', !!seg1 && seg1.text === 'Vi börjar med budgeten.');
+    ok('namnbyte → nytt stycke + speaker-flagga', seg1?.gapBefore === true && seg1?.speaker === true);
+
+    const seg2P = waiter(lw, m => m.type === 'final' && m.text.includes('aktieägarna'), 4000);
+    await post(`/api/sessions/${id}/segments`, { speaker: 'Magnus', text: 'Nästa punkt gäller aktieägarna.' }, KEY);
+    const seg2 = await seg2P;
+    ok('samma talare → inget nytt stycke', seg2?.gapBefore === false && seg2?.speaker === false && seg2?.speakerName === 'Magnus');
+
+    const seg3P = waiter(lw, m => m.type === 'final' && m.speakerName === 'Isabelle', 4000);
+    await post(`/api/sessions/${id}/segments`, { speaker: 'Isabelle', text: 'Jag tar den punkten.' }, KEY);
+    const seg3 = await seg3P;
+    ok('ny talare → nytt stycke igen', seg3?.gapBefore === true && seg3?.speaker === true);
+
+    // Insights: broadcast, upsert på key, replay till sen anslutning
+    const ins1P = waiter(lw, m => m.type === 'insight' && m.key === 'a1', 4000);
+    const rIns = await post(`/api/sessions/${id}/insights`, { kind: 'action', text: 'Magnus bokar demo', key: 'a1' }, KEY);
+    const insBody = await j(rIns);
+    ok('insight ingest → 202 med key', rIns.status === 202 && insBody.key === 'a1', `status ${rIns.status}`);
+    ok('lyssnare fick insight', (await ins1P)?.text === 'Magnus bokar demo');
+
+    const ins2P = waiter(lw, m => m.type === 'insight' && m.key === 'a1' && m.text.includes('fredag'), 4000);
+    await post(`/api/sessions/${id}/insights`, { kind: 'action', text: 'Magnus bokar demo på fredag', key: 'a1' }, KEY);
+    ok('upsert på samma key ersätter', !!(await ins2P));
+
+    const ins3P = waiter(lw, m => m.type === 'insight' && m.kind === 'note', 4000);
+    await post(`/api/sessions/${id}/insights`, { kind: 'klingon', text: 'Ogiltig kind blir note' }, KEY);
+    ok('ogiltig kind → note', !!(await ins3P));
+
+    const late = await open(`${WS_BASE}/ws/listen?id=${id}&lang=sv`);
+    // Båda waiters måste sättas upp direkt – replayen kommer i samma svep.
+    const replaySegP = waiter(late, m => m.type === 'final' && m.speakerName === 'Isabelle', 4000);
+    const replayInsP = waiter(late, m => m.type === 'insight' && m.key === 'a1', 4000);
+    ok('sen anslutning: segment replayas med speakerName', !!(await replaySegP));
+    ok('sen anslutning: insights replayas (uppdaterad text)', (await replayInsP)?.text === 'Magnus bokar demo på fredag');
+    late.close();
+    lw.close();
+  }
+
   if (existsSync(WAV)) {
     console.log(`\n— Pipeline: 3 samtidiga lyssnare på olika språk + sen anslutning —`);
     const pcm = readFileSync(WAV).subarray(44);
