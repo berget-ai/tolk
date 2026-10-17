@@ -1,0 +1,52 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ai-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: AI Review
+    runs-on: [infra-runner-set-light]
+    if: |
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '@berget') &&
+       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+                github.event.comment.author_association))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: >-
+            ${{
+              github.event.pull_request.head.sha ||
+              (github.event.issue.pull_request && format('refs/pull/{0}/merge', github.event.issue.number)) ||
+              github.sha
+            }}
+      - uses: berget-ai/ai-review-action@552bc0a7a8460168836234a8a2e85242b5e1537a # main: explain empty reviews
+        with:
+          api_key: ${{ secrets.BERGET_API_KEY }}
+          use_dora: 'false'
+          pi_model: 'berget/zai-org/GLM-5.3-Flash'
+          # APPROVE when no blockers, REQUEST_CHANGES when at least one.
+          # App credentials required — GITHUB_TOKEN cannot approve PRs.
+          approve: 'true'
+          github_app_id: ${{ secrets.AI_REVIEW_APP_ID }}
+          github_app_private_key: ${{ secrets.AI_REVIEW_APP_PRIVATE_KEY }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
