@@ -101,6 +101,46 @@ Then open http://localhost:3000.
 | `TRANSCRIBE_MODEL` | `klang/pianissimo` | Transcription model (trained for Swedish) |
 | `TRANSLATE_MODEL` | `google/gemma-4-31B-it` | Translation model |
 
+## Ingest API (external producers, e.g. the meeting bot)
+
+Sessions can also be fed **finished transcript text** instead of microphone
+audio – e.g. by [meeting-transcriber](https://github.com/berget-ai/meeting-transcriber),
+which pushes per-speaker turns and rolling meeting insights from Matrix calls.
+
+Disabled by default: set `INGEST_API_KEY` to enable the endpoints (use a
+dedicated key – **never** `BERGET_API_KEY`, which is a billing key). When
+unset, the endpoints answer `404`.
+
+```bash
+# A finished speaker turn (speaker is optional, max 4000 chars)
+curl -X POST https://tolk.example.com/api/sessions/ABCDEF/segments \
+  -H "Authorization: Bearer $INGEST_API_KEY" -H "content-type: application/json" \
+  -d '{"speaker": "Magnus", "text": "Vi börjar med budgeten."}'
+# → 202 {"ok": true}
+
+# A meeting insight. kind: agenda | action | decision | note (unknown → note).
+# Pass a stable "key" to update in place instead of stacking new rows.
+curl -X POST https://tolk.example.com/api/sessions/ABCDEF/insights \
+  -H "Authorization: Bearer $INGEST_API_KEY" -H "content-type: application/json" \
+  -d '{"kind": "action", "text": "Magnus bokar demo på fredag", "key": "a1"}'
+# → 202 {"ok": true, "key": "a1"}
+```
+
+Semantics:
+
+- Ingested segments share history, sequence space and the translation fan-out
+  with the audio pipeline, but skip VAD/cleaning/diarization (the producer has
+  already done that job). A change of `speaker` starts a new paragraph and is
+  rendered as `Name: ` instead of the acoustic em dash.
+- Insights are broadcast to all connected clients and replayed to late
+  joiners (ring buffer of 100). They are **not translated** – pushed in the
+  meeting's language. The audience page shows them in a collapsible panel
+  that appears on the first insight.
+- Ingest keeps the session alive (counts as activity for the idle reaper),
+  so a meeting session won't be reaped while the bot is pushing.
+- Sessions are in-memory: if the server restarts, the producer should
+  recreate the session on the next push (a `404` means "session gone").
+
 ## Deployment
 
 - Set `PUBLIC_URL` to the HTTPS address the service is reachable at, e.g.
@@ -140,7 +180,7 @@ microphone → broadcast page (PCM 24k) ──ws──▶ server ──ws (OpenA
 - Partial text is translated at most once per second and language to keep
   latency and cost down; finalized segments are always translated immediately.
 - One broadcaster per session. Listeners: unlimited (one WebSocket each).
-- The last 50 segments are shown to late joiners, translated into their language.
+- The last 500 segments are shown to late joiners, translated into their language.
 - Room codes use an unambiguous alphabet (no 0/O, 1/I/L) and are
   case-insensitive when typed by hand.
 

@@ -25,6 +25,21 @@
     font-family: var(--berget-font-mono); color: var(--muted); font-size: .8rem;
     letter-spacing: .15em; white-space: nowrap;
   }
+  #insights {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    font-size: .95rem; max-height: 40vh; overflow-y: auto;
+  }
+  #insights summary {
+    padding: .5rem .8rem; cursor: pointer; color: var(--muted);
+    font-weight: 600; user-select: none;
+  }
+  #insights-body { padding: 0 .8rem .6rem; }
+  #insights-body p { margin: .3rem 0; line-height: 1.4; }
+  #insights-body .kind {
+    display: inline-block; min-width: 4.6rem; font-weight: 700;
+    text-transform: uppercase; font-size: .72rem; letter-spacing: .06em;
+    color: var(--muted);
+  }
   #captions {
     flex: 1; overflow-y: auto; padding: 1rem; line-height: 1.45;
     font-size: var(--cap-size, 1.5rem); font-weight: 600;
@@ -51,6 +66,10 @@
   <button class="font-btn" id="smaller" aria-label="Smaller text">A−</button>
   <button class="font-btn" id="bigger" aria-label="Bigger text">A+</button>
 </header>
+<details id="insights" hidden>
+  <summary>Meeting insights</summary>
+  <div id="insights-body"></div>
+</details>
 <div id="captions"></div>
 <div id="status">Connecting…</div>
 <script>
@@ -106,6 +125,10 @@ function connect() {
   partialEl = null;
   blockEl = null;
 
+  insightEls.clear();
+  $('#insights-body').innerHTML = '';
+  $('#insights').hidden = true;
+
   ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws/listen?id=${id}&lang=${langSel.value}`);
   ws.onopen = () => setStatus('Connected – waiting for speech…', 'live');
   ws.onclose = () => {
@@ -115,12 +138,34 @@ function connect() {
   ws.onerror = () => ws.close();
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if (msg.type === 'partial') showPartial(msg.text, msg.gapBefore, msg.speaker, msg.seq);
-    if (msg.type === 'final') showFinal(msg.text, msg.gapBefore, msg.speaker, msg.seq);
+    if (msg.type === 'partial') showPartial(msg.text, msg.gapBefore, msg.speaker, msg.seq, msg.speakerName);
+    if (msg.type === 'final') showFinal(msg.text, msg.gapBefore, msg.speaker, msg.seq, msg.speakerName);
     if (msg.type === 'speaker') applySpeakerRetro(msg.seq);
+    if (msg.type === 'insight') upsertInsight(msg);
     if (msg.type === 'error') setStatus(msg.message, 'error');
     if (msg.type === 'state' && msg.state === 'idle') setStatus('Connected – waiting for the stream to start…');
   };
+}
+
+// ---- Insikter (agenda/åtgärder/beslut från mötesbotten) -------------------
+// Upsert på key: samma nyckel ersätter raden i stället för att stapla ny.
+const KIND_LABEL = { agenda: 'Agenda', action: 'Action', decision: 'Decision', note: 'Note' };
+const insightEls = new Map();
+
+function upsertInsight(msg) {
+  $('#insights').hidden = false;
+  let el = insightEls.get(msg.key);
+  if (!el) {
+    el = document.createElement('p');
+    insightEls.set(msg.key, el);
+    $('#insights-body').append(el);
+  }
+  const label = KIND_LABEL[msg.kind] ?? msg.kind;
+  el.innerHTML = '';
+  const k = document.createElement('span');
+  k.className = 'kind';
+  k.textContent = label;
+  el.append(k, document.createTextNode(msg.text));
 }
 
 function currentBlock() {
@@ -132,16 +177,22 @@ function currentBlock() {
   return blockEl;
 }
 
-/** Ny talare markerad? Starta alltid ett nytt stycke och sätt talstreck. */
-function prepareLine(gapBefore, speaker, seq) {
-  const isSpeaker = !!speaker || speakerSeqs.has(seq);
+/** Ny talare markerad? Starta alltid ett nytt stycke. Namngiven talare (textingest) räknas också. */
+function prepareLine(gapBefore, speaker, seq, speakerName) {
+  const isSpeaker = !!speaker || !!speakerName || speakerSeqs.has(seq);
   if (speaker) speakerSeqs.add(seq);
   if (gapBefore || isSpeaker) blockEl = null;
   return isSpeaker;
 }
 
-function showPartial(text, gapBefore, speaker, seq) {
-  const isSpeaker = prepareLine(gapBefore, speaker, seq);
+/** Prefix: "Namn:" vid känt talarnamn, annars talstreck vid akustiskt byte. */
+function speakerPrefix(isSpeaker, speakerName) {
+  if (speakerName) return speakerName + ': ';
+  return isSpeaker ? '— ' : '';
+}
+
+function showPartial(text, gapBefore, speaker, seq, speakerName) {
+  const isSpeaker = prepareLine(gapBefore, speaker, seq, speakerName);
   if (!partialEl) {
     partialEl = document.createElement('p');
     partialEl.id = 'partial';
@@ -149,18 +200,18 @@ function showPartial(text, gapBefore, speaker, seq) {
   }
   partialEl.dataset.seq = seq;
   partialEl.classList.toggle('speaker-start', isSpeaker);
-  partialEl.textContent = (isSpeaker ? '— ' : '') + text;
+  partialEl.textContent = speakerPrefix(isSpeaker, speakerName) + text;
   markOld();
   scrollDown();
 }
 
-function showFinal(text, gapBefore, speaker, seq) {
-  const isSpeaker = prepareLine(gapBefore, speaker, seq);
+function showFinal(text, gapBefore, speaker, seq, speakerName) {
+  const isSpeaker = prepareLine(gapBefore, speaker, seq, speakerName);
   if (partialEl) { partialEl.remove(); partialEl = null; }
   const p = document.createElement('p');
   p.dataset.seq = seq;
   p.className = isSpeaker ? 'speaker-start' : '';
-  p.textContent = (isSpeaker ? '— ' : '') + text;
+  p.textContent = speakerPrefix(isSpeaker, speakerName) + text;
   currentBlock().append(p);
   while (captions.children.length > 50) captions.firstChild.remove();
   markOld();

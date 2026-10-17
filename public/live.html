@@ -188,8 +188,8 @@ function connectListener() {
   listenWs.onerror = () => listenWs.close();
   listenWs.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if (msg.type === 'partial') showPartial(msg.text, msg.gapBefore, msg.speaker, msg.seq);
-    if (msg.type === 'final') showFinal(msg.text, msg.gapBefore, msg.speaker, msg.seq);
+    if (msg.type === 'partial') showPartial(msg.text, msg.gapBefore, msg.speaker, msg.seq, msg.speakerName);
+    if (msg.type === 'final') showFinal(msg.text, msg.gapBefore, msg.speaker, msg.seq, msg.speakerName);
     if (msg.type === 'speaker') applySpeakerRetro(msg.seq);
   };
 }
@@ -203,15 +203,20 @@ function currentBlock() {
   return blockEl;
 }
 
-function prepareLine(gapBefore, speaker, seq) {
-  const isSpeaker = !!speaker || speakerSeqs.has(seq);
+function prepareLine(gapBefore, speaker, seq, speakerName) {
+  const isSpeaker = !!speaker || !!speakerName || speakerSeqs.has(seq);
   if (speaker) speakerSeqs.add(seq);
   if (gapBefore || isSpeaker) blockEl = null;
   return isSpeaker;
 }
 
-function showPartial(text, gapBefore, speaker, seq) {
-  const isSpeaker = prepareLine(gapBefore, speaker, seq);
+function speakerPrefix(isSpeaker, speakerName) {
+  if (speakerName) return speakerName + ': ';
+  return isSpeaker ? '— ' : '';
+}
+
+function showPartial(text, gapBefore, speaker, seq, speakerName) {
+  const isSpeaker = prepareLine(gapBefore, speaker, seq, speakerName);
   if (!partialEl) {
     partialEl = document.createElement('p');
     partialEl.className = 'partial';
@@ -219,17 +224,17 @@ function showPartial(text, gapBefore, speaker, seq) {
   }
   partialEl.dataset.seq = seq;
   partialEl.classList.toggle('speaker-start', isSpeaker);
-  partialEl.textContent = (isSpeaker ? '— ' : '') + text;
+  partialEl.textContent = speakerPrefix(isSpeaker, speakerName) + text;
   ageLines();
 }
 
-function showFinal(text, gapBefore, speaker, seq) {
-  const isSpeaker = prepareLine(gapBefore, speaker, seq);
+function showFinal(text, gapBefore, speaker, seq, speakerName) {
+  const isSpeaker = prepareLine(gapBefore, speaker, seq, speakerName);
   if (partialEl) { partialEl.remove(); partialEl = null; }
   const p = document.createElement('p');
   p.dataset.seq = seq;
   p.className = isSpeaker ? 'speaker-start' : '';
-  p.textContent = (isSpeaker ? '— ' : '') + text;
+  p.textContent = speakerPrefix(isSpeaker, speakerName) + text;
   currentBlock().append(p);
   const lines = captions.querySelectorAll('p');
   if (lines.length > MAX_OLD_LINES + 1) lines[0].closest('div').childElementCount === 1
