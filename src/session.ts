@@ -355,12 +355,16 @@ export class Session {
 
     // Skicka historik i lyssnarens språk, i ordning – i begränsade batchar,
     // så att en sen anslutning på ett nytt språk inte eldar hundratals
-    // samtidiga översättningsanrop mot den betalda API:n.
+    // samtidiga översättningsanrop mot den betalda API:n. Snapshot: replayen
+    // kan pågå länge – segment som committas under tiden når lyssnaren via
+    // commitSegments fläkt, och ska varken dubbelsändas eller skjuta undan
+    // index i historiken.
     const BACKLOG_CONCURRENCY = 8;
+    const backlog = this.history.slice();
     void (async () => {
-      for (let i = 0; i < this.history.length; i += BACKLOG_CONCURRENCY) {
+      for (let i = 0; i < backlog.length; i += BACKLOG_CONCURRENCY) {
         await Promise.all(
-          this.history.slice(i, i + BACKLOG_CONCURRENCY).map(async (seg) => {
+          backlog.slice(i, i + BACKLOG_CONCURRENCY).map(async (seg) => {
             const text = await this.translationFor(seg, lang);
             this.send(ws, {
               type: 'final', seq: seg.seq, text,
