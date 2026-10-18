@@ -205,6 +205,22 @@ function showPartial(text, gapBefore, speaker, seq, speakerName) {
   scrollDown();
 }
 
+/**
+ * DOM-kap på radräkning, inte block: textingest (namngivna talare) ger ett
+ * block per rad, och en blockräknad kap kastade då bort historik långt före
+ * serverns 500-segmentsreplay. Tömda block städas med.
+ */
+function trimCaptions() {
+  let lines = captions.querySelectorAll('p');
+  while (lines.length > 300) {
+    const victim = lines[0];
+    const host = victim.parentElement;
+    victim.remove();
+    if (host !== captions && host.childElementCount === 0) host.remove();
+    lines = captions.querySelectorAll('p');
+  }
+}
+
 function showFinal(text, gapBefore, speaker, seq, speakerName) {
   const isSpeaker = prepareLine(gapBefore, speaker, seq, speakerName);
   if (partialEl) { partialEl.remove(); partialEl = null; }
@@ -213,7 +229,7 @@ function showFinal(text, gapBefore, speaker, seq, speakerName) {
   p.className = isSpeaker ? 'speaker-start' : '';
   p.textContent = speakerPrefix(isSpeaker, speakerName) + text;
   currentBlock().append(p);
-  while (captions.children.length > 50) captions.firstChild.remove();
+  trimCaptions();
   markOld();
   scrollDown();
 }
