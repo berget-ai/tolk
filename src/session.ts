@@ -15,6 +15,9 @@ const INSIGHTS_LIMIT = 100;
 const PARTIAL_THROTTLE_MS = Number(process.env.PARTIAL_THROTTLE_MS ?? 1500);
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const IDLE_TTL_MS = 15 * 60 * 1000;
+// Tak mot minnesutmattning: skapande av sessioner är oautentiserat, så
+// skriptade anrop (slumpade eller claims) får inte växa registret obegränsat.
+const MAX_SESSIONS = Number(process.env.MAX_SESSIONS ?? 1000);
 
 // Styckebrytning ("mellanrum") vid tystnad:
 const SPEECH_PEAK = 500; // PCM-amplitud (av 32768) under vilken ljud räknas som tystnad
@@ -610,7 +613,12 @@ export class Session {
 
 const sessions = new Map<string, Session>();
 
-export function createSession(sourceLang: string): Session {
+/** Slumpad ny session, eller null när registret är fullt (MAX_SESSIONS). */
+export function createSession(sourceLang: string): Session | null {
+  if (sessions.size >= MAX_SESSIONS) {
+    console.warn(`ny session avvisad – MAX_SESSIONS (${MAX_SESSIONS}) nått`);
+    return null;
+  }
   let session = new Session(sourceLang);
   while (sessions.has(session.id)) session = new Session(sourceLang);
   sessions.set(session.id, session);
@@ -636,18 +644,25 @@ export function isWellFormedCode(id: string): boolean {
  * QR-koder överlever serveromstarter och TTL-städning: den första enheten
  * (projektorskärm, telefon eller mötesbot) som använder koden igen får en ny
  * session på exakt samma kod. Finns koden redan returneras den befintliga
- * sessionen orörd (created=false). Returnerar null för felformade koder.
+ * sessionen orörd (created=false). Returnerar null för felformade koder –
+ * och när registret är fullt (MAX_SESSIONS), så att skriptade claims inte
+ * äter minne.
  */
 export function claimSession(
   sourceLang: string,
   id: string,
 ): { session: Session; created: boolean } | null {
+  if (!isWellFormedCode(id)) return null;
   const code = normalizeRoomCode(id);
-  if (!isWellFormedCode(code)) return null;
   const existing = sessions.get(code);
   if (existing) return { session: existing, created: false };
+  if (sessions.size >= MAX_SESSIONS) {
+    console.warn(`[${code}] claim avvisad – MAX_SESSIONS (${MAX_SESSIONS}) nått`);
+    return null;
+  }
   const session = new Session(sourceLang, code);
   sessions.set(code, session);
+  console.log(`[${code}] session återskapad lat (källspråk ${sourceLang})`);
   return { session, created: true };
 }
 

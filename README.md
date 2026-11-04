@@ -57,6 +57,10 @@ to touch it – the presentation screen, an audience phone or the meeting bot �
 gets a fresh session on that exact code. Printed QR codes therefore survive
 server restarts, redeploys and TTL cleanup with zero persistence.
 
+Recreation is unauthenticated by design, so the session registry is capped
+(`MAX_SESSIONS`, default 1000) against scripted claims, and every lazy
+recreation is logged with its code and source language.
+
 A recreated code defaults to Swedish as the source language. To claim a
 printed code in another language, claim it explicitly first (idempotent –
 an already-live code returns the existing session untouched):
@@ -133,6 +137,7 @@ Then open http://localhost:3000.
 | `TRANSCRIBE_MODEL` | `klang/pianissimo` | Transcription model (trained for Swedish) |
 | `TRANSLATE_MODEL` | `google/gemma-4-31B-it` | Translation model |
 | `PARTIAL_THROTTLE_MS` | `1500` | Min interval between partial translations, per language |
+| `MAX_SESSIONS` | `1000` | Cap on concurrent sessions – session creation is unauthenticated, so this bounds memory against scripted claims |
 
 ## Ingest API (external producers, e.g. the meeting bot)
 

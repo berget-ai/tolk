@@ -99,6 +99,7 @@ const server = createServer(async (req, res) => {
       }
 
       const session = createSession(lang);
+      if (!session) return json(res, 503, { error: 'Server busy – too many active streams' });
       const listenUrl = `${PUBLIC_URL}/listen?id=${session.id}`;
       const qrDataUrl = await QRCode.toDataURL(listenUrl, { width: 480, margin: 2 });
       console.log(`[${session.id}] new session, source language ${lang}`);
