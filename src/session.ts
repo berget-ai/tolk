@@ -11,7 +11,8 @@ import { Transcriber } from './transcriber.js';
 
 const HISTORY_LIMIT = 500; // möten via textingest genererar långt fler segment än mic-flödet
 const INSIGHTS_LIMIT = 100;
-const PARTIAL_THROTTLE_MS = 1000;
+// Takt för partial-översättning: hellre en sekund extra än hackiga fragment.
+const PARTIAL_THROTTLE_MS = Number(process.env.PARTIAL_THROTTLE_MS ?? 1500);
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const IDLE_TTL_MS = 15 * 60 * 1000;
 
@@ -83,6 +84,8 @@ export class Session {
   private partialTimers = new Map<string, NodeJS.Timeout>();
   // Textingest (mötesbot): senaste talarnamnet för byte-detektering
   private lastSpeakerName: string | undefined;
+  // Senaste färdiga meningen – kontext så tolkningen hänger ihop med det som nyss sades
+  private lastFinalOriginal = '';
   // Insikter (agenda/åtgärder/beslut) – upsert på key, replay till nya lyssnare
   private insights: Insight[] = [];
   private insightSeq = 0;
@@ -364,8 +367,8 @@ export class Session {
     void (async () => {
       for (let i = 0; i < backlog.length; i += BACKLOG_CONCURRENCY) {
         await Promise.all(
-          backlog.slice(i, i + BACKLOG_CONCURRENCY).map(async (seg) => {
-            const text = await this.translationFor(seg, lang);
+          backlog.slice(i, i + BACKLOG_CONCURRENCY).map(async (seg, j) => {
+            const text = await this.translationFor(seg, lang, backlog[i + j - 1]?.original);
             this.send(ws, {
               type: 'final', seq: seg.seq, text,
               gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName: seg.speakerName,
@@ -382,7 +385,7 @@ export class Session {
 
     const current = this.partial;
     if (current) {
-      void translate(current, this.sourceLang, lang).then((text) => {
+      void translate(current, this.sourceLang, lang, this.lastFinalOriginal).then((text) => {
         if (this.partial === current) {
           this.send(ws, { type: 'partial', seq: this.seq + 1, text });
         }
@@ -431,7 +434,7 @@ export class Session {
       this.partialTimers.delete(lang);
       const current = this.partial;
       if (!current) return;
-      void translate(current, this.sourceLang, lang).then((translated) => {
+      void translate(current, this.sourceLang, lang, this.lastFinalOriginal).then((translated) => {
         if (this.partial === current) {
           const gapBefore = this.gapFor(this.seq + 1);
           this.sendToLang(lang, { type: 'partial', seq: this.seq + 1, text: translated, gapBefore });
@@ -477,15 +480,17 @@ export class Session {
 
   /** Historik + broadcast + översättningsfläkt – delad av ljud- och textingestvägen. */
   private commitSegment(seg: Segment): void {
+    const prevOriginal = this.history.at(-1)?.original;
     this.history.push(seg);
     if (this.history.length > HISTORY_LIMIT) this.history.shift();
+    this.lastFinalOriginal = seg.original;
 
     this.send(this.broadcaster, {
       type: 'final', seq: seg.seq, text: seg.original,
       gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName: seg.speakerName,
     });
     for (const lang of this.distinctLangs()) {
-      void this.translationFor(seg, lang).then((translated) =>
+      void this.translationFor(seg, lang, prevOriginal).then((translated) =>
         this.sendToLang(lang, {
           type: 'final', seq: seg.seq, text: translated,
           gapBefore: seg.gapBefore, speaker: seg.speaker, speakerName: seg.speakerName,
@@ -553,8 +558,8 @@ export class Session {
     return insight;
   }
 
-  private async translationFor(seg: Segment, lang: string): Promise<string> {
-    seg.translations[lang] ??= await translate(seg.original, this.sourceLang, lang);
+  private async translationFor(seg: Segment, lang: string, context?: string): Promise<string> {
+    seg.translations[lang] ??= await translate(seg.original, this.sourceLang, lang, context);
     return seg.translations[lang];
   }
 

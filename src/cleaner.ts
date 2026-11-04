@@ -44,6 +44,7 @@ export async function cleanSegment(text: string, lang: string): Promise<string> 
               'Fix speech-recognition slips, punctuation and capitalization.',
               'Remove filler words (um, eh, liksom, alltså ...), false starts, stutters and needless repetitions, and tighten grammar so the history is scannable.',
               'Preserve every fact and the original meaning – never add information.',
+              'The speaker may switch languages mid-segment (e.g. Swedish ↔ English) – NEVER translate: every word stays in the language it was spoken in.',
               'If the fragment is very short or incomplete, only fix obvious errors.',
               'Reply with ONLY the rewritten text, no quotes or commentary.',
             ].join(' '),
