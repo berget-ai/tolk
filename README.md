@@ -24,7 +24,7 @@ No login – the same flow as Mentimeter:
    claims it.
 3. **The audience** scans the QR code (or types the room code), picks a language
    and reads along live. Partial fragments are translated continuously (max
-   once/second per language) and finalized segments replace them. The screen is
+   once/1.5 s per language) and finalized segments replace them. The screen is
    kept awake via Wake Lock.
 
 Microphone audio streams as 24 kHz PCM over WebSocket to the server, which
@@ -34,6 +34,19 @@ VAD – speech is segmented automatically at pauses.
 The large screen view shows the source language by default (the server skips
 the translation step when source and target match). To caption the big screen
 in another language: `/live?id=CODE&lang=en`.
+
+### Interpreter-style captions
+
+Translation is done like a real-time interpreter rather than word for word:
+filler words (hmm, mmm, oj, um …), stutters and false starts are dropped and
+the meaning is rendered as a clean, fluent caption. Each fragment is
+interpreted with the previous sentence as context so pronouns and terminology
+stay consistent, and consecutive segments continue on the same caption line
+until a pause (or speaker change) starts a new paragraph. Speakers who
+code-switch mid-sentence are handled explicitly: everything reads naturally in
+the viewer's language, and parts already in that language are kept verbatim.
+When the viewer's language *is* the source language, no translation happens at
+all – the cleanup pass keeps every word in the language it was spoken in.
 
 ### Paragraph breaks at silence ("mellanrum")
 
@@ -100,6 +113,7 @@ Then open http://localhost:3000.
 | `PUBLIC_URL` | `http://localhost:PORT` | Public URL encoded in the QR code |
 | `TRANSCRIBE_MODEL` | `klang/pianissimo` | Transcription model (trained for Swedish) |
 | `TRANSLATE_MODEL` | `google/gemma-4-31B-it` | Translation model |
+| `PARTIAL_THROTTLE_MS` | `1500` | Min interval between partial translations, per language |
 
 ## Ingest API (external producers, e.g. the meeting bot)
 
@@ -177,8 +191,9 @@ microphone → broadcast page (PCM 24k) ──ws──▶ server ──ws (OpenA
 - `klang/pianissimo` is trained for **Swedish** (dialects and accents included).
   Other source languages need a different transcription model – set
   `TRANSCRIBE_MODEL` and adjust `languages` in `src/transcriber.ts`.
-- Partial text is translated at most once per second and language to keep
-  latency and cost down; finalized segments are always translated immediately.
+- Partial text is translated at most once every `PARTIAL_THROTTLE_MS` (1.5 s by
+  default) per language to keep latency and cost down; finalized segments are
+  always translated immediately.
 - One broadcaster per session. Listeners: unlimited (one WebSocket each).
 - The last 500 segments are shown to late joiners, translated into their language.
 - Room codes use an unambiguous alphabet (no 0/O, 1/I/L) and are

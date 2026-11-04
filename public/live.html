@@ -231,11 +231,19 @@ function showPartial(text, gapBefore, speaker, seq, speakerName) {
 function showFinal(text, gapBefore, speaker, seq, speakerName) {
   const isSpeaker = prepareLine(gapBefore, speaker, seq, speakerName);
   if (partialEl) { partialEl.remove(); partialEl = null; }
-  const p = document.createElement('p');
-  p.dataset.seq = seq;
-  p.className = isSpeaker ? 'speaker-start' : '';
-  p.textContent = speakerPrefix(isSpeaker, speakerName) + text;
-  currentBlock().append(p);
+  const block = currentBlock();
+  const prev = block.lastElementChild;
+  // Fortsätt på förra raden i samma stycke – som en tolk som låter meningen
+  // rinna vidare. Paus (mellanrum), talarbyte och namngivna talare bryter alltid.
+  if (prev && !gapBefore && !isSpeaker && prev.textContent.length + text.length < 280) {
+    prev.textContent += ' ' + text;
+  } else {
+    const p = document.createElement('p');
+    p.dataset.seq = seq;
+    p.className = isSpeaker ? 'speaker-start' : '';
+    p.textContent = speakerPrefix(isSpeaker, speakerName) + text;
+    block.append(p);
+  }
   const lines = captions.querySelectorAll('p');
   if (lines.length > MAX_OLD_LINES + 1) lines[0].closest('div').childElementCount === 1
     ? lines[0].closest('div').remove()
