@@ -48,6 +48,25 @@ the viewer's language, and parts already in that language are kept verbatim.
 When the viewer's language *is* the source language, no translation happens at
 all – the cleanup pass keeps every word in the language it was spoken in.
 
+### Reusable room codes (printed QR codes)
+
+Sessions live in memory and are cleaned up when idle – but a room code is
+never *lost*. Any well-formed code (six characters from the code alphabet)
+that is unknown to the server is **recreated on first use**: the first device
+to touch it – the presentation screen, an audience phone or the meeting bot –
+gets a fresh session on that exact code. Printed QR codes therefore survive
+server restarts, redeploys and TTL cleanup with zero persistence.
+
+A recreated code defaults to Swedish as the source language. To claim a
+printed code in another language, claim it explicitly first (idempotent –
+an already-live code returns the existing session untouched):
+
+```bash
+curl -X POST https://tolk.berget.ai/api/sessions \
+  -H 'content-type: application/json' \
+  -d '{"id": "ABC234", "sourceLang": "en"}'
+```
+
 ### Paragraph breaks at silence ("mellanrum")
 
 When the speaker pauses, a small gap is inserted between caption paragraphs on
@@ -197,7 +216,10 @@ microphone → broadcast page (PCM 24k) ──ws──▶ server ──ws (OpenA
 - One broadcaster per session. Listeners: unlimited (one WebSocket each).
 - The last 500 segments are shown to late joiners, translated into their language.
 - Room codes use an unambiguous alphabet (no 0/O, 1/I/L) and are
-  case-insensitive when typed by hand.
+  case-insensitive when typed by hand. Unknown but well-formed codes are
+  recreated on first use (see [Reusable room codes](#reusable-room-codes-printed-qr-codes)),
+  so a mistyped code shows an empty "waiting for the stream to start…" page
+  rather than an error.
 
 ## Cost estimate
 

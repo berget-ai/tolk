@@ -8,7 +8,7 @@ import QRCode from 'qrcode';
 import { WebSocketServer, WebSocket as WsWebSocket } from 'ws';
 
 import { isValidLanguage, LANGUAGES } from './languages.js';
-import { createSession, getSession, type InsightKind } from './session.js';
+import { claimSession, createSession, getSession, type InsightKind } from './session.js';
 
 try {
   loadEnvFile();
@@ -75,10 +75,28 @@ const server = createServer(async (req, res) => {
     // ---- API ---------------------------------------------------------
     // Swedish speech is the default – creating a stream is a single click,
     // no language picker (an explicit invalid code still fails).
+    // Optional "id" claims a specific room code (printed QR codes): 201 when
+    // created, 200 when the code was already live – the call is idempotent.
     if (path === '/api/sessions' && req.method === 'POST') {
-      const { sourceLang } = JSON.parse((await readBody(req)) || '{}');
+      const { sourceLang, id } = JSON.parse((await readBody(req)) || '{}');
       const lang = sourceLang === undefined ? 'sv' : sourceLang;
       if (!isValidLanguage(lang)) return json(res, 400, { error: 'Invalid source language' });
+
+      if (id !== undefined) {
+        const claim = claimSession(lang, String(id));
+        if (!claim) return json(res, 400, { error: 'Invalid room code' });
+        const listenUrl = `${PUBLIC_URL}/listen?id=${claim.session.id}`;
+        const qrDataUrl = await QRCode.toDataURL(listenUrl, { width: 480, margin: 2 });
+        console.log(
+          `[${claim.session.id}] ${claim.created ? 'claimed code' : 'code already live'}, source language ${claim.session.sourceLang}`,
+        );
+        return json(res, claim.created ? 201 : 200, {
+          id: claim.session.id,
+          sourceLang: claim.session.sourceLang,
+          listenUrl,
+          qrDataUrl,
+        });
+      }
 
       const session = createSession(lang);
       const listenUrl = `${PUBLIC_URL}/listen?id=${session.id}`;
@@ -92,9 +110,12 @@ const server = createServer(async (req, res) => {
       });
     }
 
+    // GET på en okänd men välformad kod återskapar sessionen på samma kod –
+    // tryckta QR-koder överlever därmed omstarter och städning (svenska som
+    // default; claima explicit via POST för annat källspråk).
     const sessionMatch = path.match(/^\/api\/sessions\/([\w-]+)$/);
     if (sessionMatch && req.method === 'GET') {
-      const session = getSession(sessionMatch[1]);
+      const session = getSession(sessionMatch[1]) ?? claimSession('sv', sessionMatch[1])?.session;
       if (!session) return json(res, 404, { error: 'Stream not found' });
       const listenUrl = `${PUBLIC_URL}/listen?id=${session.id}`;
       return json(res, 200, {
@@ -118,7 +139,9 @@ const server = createServer(async (req, res) => {
     if (ingestMatch && req.method === 'POST') {
       if (!INGEST_API_KEY) return json(res, 404, { error: 'Not found' });
       if (!validIngestKey(req)) return json(res, 401, { error: 'Unauthorized' });
-      const session = getSession(ingestMatch[1]);
+      // Samma återanvändningsregel: mötesbotten kan pusha till en tryckt kod
+      // direkt efter en omstart – sessionen återskapas på koden.
+      const session = getSession(ingestMatch[1]) ?? claimSession('sv', ingestMatch[1])?.session;
       if (!session) return json(res, 404, { error: 'Stream not found' });
       let body: Record<string, unknown>;
       try {
@@ -203,7 +226,8 @@ server.on('upgrade', (req, socket, head) => {
   const pathname = decodeURIComponent(url.pathname);
 
   if (pathname === '/ws/broadcast') {
-    const session = getSession(url.searchParams.get('id') ?? '');
+    const id = url.searchParams.get('id') ?? '';
+    const session = getSession(id) ?? claimSession('sv', id)?.session;
     wss.handleUpgrade(req, socket, head, (ws) => {
       if (!session || !session.attachBroadcaster(ws)) {
         ws.send(JSON.stringify({ type: 'error', message: 'The stream is busy or does not exist' }));
@@ -225,7 +249,8 @@ server.on('upgrade', (req, socket, head) => {
   }
 
   if (pathname === '/ws/listen') {
-    const session = getSession(url.searchParams.get('id') ?? '');
+    const id = url.searchParams.get('id') ?? '';
+    const session = getSession(id) ?? claimSession('sv', id)?.session;
     const lang = url.searchParams.get('lang') ?? 'en';
     wss.handleUpgrade(req, socket, head, (ws) => {
       if (!session || !isValidLanguage(lang)) {

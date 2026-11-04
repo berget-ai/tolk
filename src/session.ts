@@ -56,6 +56,7 @@ export type SessionState = 'idle' | 'connecting' | 'ready' | 'error';
 
 /** Tydliga, otvetydiga tecken (utan 0/O, 1/I/L) – ska gå att säga högt och slå in. */
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{6}$`);
 
 function newRoomCode(len = 6): string {
   const bytes = randomBytes(len);
@@ -69,7 +70,7 @@ function newRoomCode(len = 6): string {
  * som får live-text översatt till sitt språk.
  */
 export class Session {
-  readonly id = newRoomCode();
+  readonly id: string;
   readonly createdAt = Date.now();
   lastActivity = Date.now();
   state: SessionState = 'idle';
@@ -104,7 +105,9 @@ export class Session {
   // Rullande ljudlogg (~45 s) för diarization-fönster
   private audioLog: AudioChunk[] = [];
 
-  constructor(readonly sourceLang: string) {}
+  constructor(readonly sourceLang: string, code?: string) {
+    this.id = code ?? newRoomCode();
+  }
 
   // ---- Sändare -------------------------------------------------------
 
@@ -621,6 +624,31 @@ export function normalizeRoomCode(id: string): string {
 
 export function getSession(id: string): Session | undefined {
   return sessions.get(normalizeRoomCode(id));
+}
+
+/** Är koden en välformad rumskod (6 tecken ur alfabetet)? */
+export function isWellFormedCode(id: string): boolean {
+  return CODE_RE.test(normalizeRoomCode(id));
+}
+
+/**
+ * Claimar en specifik kod – nyckeln bakom återanvändbara rumkoder. Tryckta
+ * QR-koder överlever serveromstarter och TTL-städning: den första enheten
+ * (projektorskärm, telefon eller mötesbot) som använder koden igen får en ny
+ * session på exakt samma kod. Finns koden redan returneras den befintliga
+ * sessionen orörd (created=false). Returnerar null för felformade koder.
+ */
+export function claimSession(
+  sourceLang: string,
+  id: string,
+): { session: Session; created: boolean } | null {
+  const code = normalizeRoomCode(id);
+  if (!isWellFormedCode(code)) return null;
+  const existing = sessions.get(code);
+  if (existing) return { session: existing, created: false };
+  const session = new Session(sourceLang, code);
+  sessions.set(code, session);
+  return { session, created: true };
 }
 
 setInterval(() => {
