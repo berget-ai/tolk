@@ -64,6 +64,37 @@ async function main() {
     w3.close();
   }
 
+  console.log(`\n— Återanvändbara koder (tryckta QR) —`);
+  { // välformad men okänd kod återskapas lat; felformade koder ger 404
+    const r1 = await fetch(`${BASE}/api/sessions/TEST42`);
+    const d1 = await j(r1);
+    ok('GET okänd välformad kod → 200 återskapad', r1.status === 200 && d1.id === 'TEST42' && d1.sourceLang === 'sv', JSON.stringify(d1).slice(0, 90));
+    const r2 = await fetch(`${BASE}/api/sessions/ABC123`);
+    ok('GET felformad kod (1 är ogiltigt) → 404', r2.status === 404, `status ${r2.status}`);
+    const r3 = await fetch(`${BASE}/api/sessions/TOOLONG9`);
+    ok('GET för lång kod → 404', r3.status === 404, `status ${r3.status}`);
+
+    const r4 = await fetch(`${BASE}/api/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":"TEST42"}' });
+    ok('POST claim på levande kod → 200, samma session', r4.status === 200 && (await j(r4)).id === 'TEST42', `status ${r4.status}`);
+    const r5 = await fetch(`${BASE}/api/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":"NEWCD9","sourceLang":"en"}' });
+    const d5 = await j(r5);
+    ok('POST claim ny kod + språk → 201 en', r5.status === 201 && d5.id === 'NEWCD9' && d5.sourceLang === 'en', JSON.stringify(d5).slice(0, 90));
+    const r6 = await fetch(`${BASE}/api/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":"NEWCD9","sourceLang":"de"}' });
+    const d6 = await j(r6);
+    ok('POST claim igen → 200, språket orört', r6.status === 200 && d6.sourceLang === 'en', JSON.stringify(d6).slice(0, 90));
+    const r7 = await fetch(`${BASE}/api/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":"FEL1AK"}' });
+    ok('POST claim felformad kod → 400', r7.status === 400, `status ${r7.status}`);
+
+    // WS broadcast mot okänd välformad kod → sessionen skapas och rollen ges
+    const wb = await open(`${WS_BASE}/ws/broadcast?id=WSBRD9`);
+    const errMsg = await Promise.race([
+      waiter(wb, m => m.type === 'error', 1500, 'err'),
+      new Promise(r => setTimeout(() => r(null), 1800)),
+    ]);
+    ok('broadcast mot återskapad kod → avvisas inte', errMsg === null, JSON.stringify(errMsg));
+    wb.close();
+  }
+
   { // rollclaim: första broadcaster får rollen, andra avvisas; första kan fortsätta
     const b1 = await open(`${WS_BASE}/ws/broadcast?id=${id}`);
     const b2p = new Promise((res) => { const w = new WebSocket(`${WS_BASE}/ws/broadcast?id=${id}`); w.on('message', (raw) => { const m = JSON.parse(raw.toString()); if (m.type === 'error') res(m); }); });
