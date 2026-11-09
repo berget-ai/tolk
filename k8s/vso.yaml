@@ -1,0 +1,44 @@
+# VSO-koppling för Tolk/LiveText-secrets i OpenBao.
+#
+#   secret/tolk/app   key "BERGET_API_KEY" — API-nyckel som servern
+#                     använder mot api.berget.ai (transkribering,
+#                     översättning, System One). Se README.md för
+#                     bootstrap-kommandona.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault-client
+  namespace: tolk
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: vault-auth
+  namespace: tolk
+spec:
+  kubernetes:
+    role: tolk
+    serviceAccount: vault-client
+    tokenExpirationSeconds: 600
+  method: kubernetes
+  mount: kubernetes-berget-dmz
+  vaultConnectionRef: vault-secrets-operator-system/default
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: tolk-secrets
+  namespace: tolk
+spec:
+  vaultAuthRef: vault-auth
+  mount: secret
+  type: kv-v2
+  path: tolk/app
+  refreshAfter: 60s
+  destination:
+    create: true
+    overwrite: true
+    name: tolk-secrets
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: tolk

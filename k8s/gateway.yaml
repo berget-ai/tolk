@@ -1,0 +1,100 @@
+# Publik Gateway för Tolk (tolk.berget.ai).
+#
+# Per-app-gateway enligt etablerat dmz-mönster (firecrawl/netbird):
+# gatewayClassName eg får en LoadBalancer-svc från Harvester-klustret.
+# Kontrollera att IPPoolen `berget` har en ledig slot innan rollout
+# (kubectl get svc -A | grep envoy) – se README.
+#
+# Tjänsten kör LÅNGLIVADE WebSockets (både /ws/broadcast och /ws/listen hålls
+# öppna en hel sändning). Två timeout-lager krävs därför, samma som netbird:
+#   - ClientTrafficPolicy streamIdleTimeout: 0s  (annars reaper Envoy efter
+#     ~300 s stillastående – dödar tysta textflöden mitt i ett tal)
+#   - HTTPRoute timeouts.request 24h (GEP-1742, request-nivå)
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: tolk-gateway
+  namespace: tolk
+  annotations:
+    # external-dns på dmz hanterar bara zonerna dmz.berget.ai / r8s.berget.ai /
+    # berget.cloud (se infrastructure/external-dns). A-record:et för
+    # tolk.dmz.berget.ai matas i praktiken via tolk-dmz-route nedan
+    # (external-dns sourcar från HTTPRoute-hostnames i detta kluster);
+    # tolk.berget.ai CNAME:as manuellt dit (wejay-mönstret).
+    external-dns.kubernetes.io/hostname: tolk.dmz.berget.ai
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: "tolk.berget.ai"
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "tolk.berget.ai"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: tolk-tls
+    # external-dns på dmz sourcar poster från HTTPRoute-hostnames (inte från
+    # Gateway-annotationen) — därför finns en ren HTTP-lyssnare på
+    # tolk.dmz.berget.ai som routen nedan hänger på. Namnet används bara som
+    # CNAME-mål för tolk.berget.ai; det behöver ingen TLS.
+    - name: http-dmz
+      protocol: HTTP
+      port: 80
+      hostname: "tolk.dmz.berget.ai"
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: tolk-stream-idle
+  namespace: tolk
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: tolk-gateway
+  timeout:
+    http:
+      streamIdleTimeout: 0s
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: tolk-route
+  namespace: tolk
+spec:
+  parentRefs:
+    - name: tolk-gateway
+      sectionName: https
+  hostnames:
+    - "tolk.berget.ai"
+  rules:
+    - backendRefs:
+        - name: tolk
+          port: 3000
+      timeouts:
+        request: 86400s
+---
+# DNS-matnings-routen: ger external-dns en hostname i dmz.berget.ai-zonen
+# att skapa A-record för (CNAME-mål för tolk.berget.ai). Jämför
+# wejay-endpoint-route som external-dns satt heritage-TXT på.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: tolk-dmz-route
+  namespace: tolk
+spec:
+  parentRefs:
+    - name: tolk-gateway
+      sectionName: http-dmz
+  hostnames:
+    - "tolk.dmz.berget.ai"
+  rules:
+    - backendRefs:
+        - name: tolk
+          port: 3000
+      timeouts:
+        request: 86400s

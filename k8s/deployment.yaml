@@ -1,0 +1,86 @@
+# Deploys Tolk/LiveText (QR-code live captions & translation) to berget-dmz.
+#
+# This file lives in the app repo and is reconciled by Flux from
+# clusters/berget-dmz/apps/tolk/ in the infra repo (GitRepository "tolk").
+# The image tag is kept current automatically by Flux image update
+# automation (ImageUpdateAutomation "tolk"): the docker workflow bumps
+# ghcr.io/berget-ai/tolk on every push to main, the ImageRepository scans
+# new tags, the ImagePolicy picks the latest semver tag and the
+# ImageUpdateAutomation commits the bump back to this file (see the
+# $imagepolicy marker on the image line below).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tolk
+  namespace: tolk
+  labels:
+    app: tolk
+spec:
+  # En replik med avsikt: sessioner (sändningar med historik) lever i minnet i
+  # podden som WS:n är kopplad till — flera replikor skulle kräva sticky
+  # routing eller en delad sessionstore (se README "Kända begränsningar").
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tolk
+  template:
+    metadata:
+      labels:
+        app: tolk
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: tolk
+          # Taggen underhålls av Flux image update automation –
+          # skriv aldrig över den manuellt efter merge.
+          image: ghcr.io/berget-ai/tolk:0.6.0 # {"$imagepolicy": "flux-system:tolk"}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            # Imagen kör som `node` (namn, inte UID) — Kubernetes kräver
+            # numeriskt UID för att kunna verifiera runAsNonRoot.
+            runAsUser: 1000
+            runAsGroup: 1000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: PUBLIC_URL
+              value: "https://tolk.berget.ai"
+          # BERGET_API_KEY m.fl. från OpenBao (vso.yaml → secret/tolk/app).
+          envFrom:
+            - secretRef:
+                name: tolk-secrets
+          resources:
+            # Diarization-modellerna (~1,5 MB + ~26 MB) laddas i minnet per
+            # pod; transcription/translation sker hos Berget API.
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          lifecycle:
+            # WebSocket-sessioner ska hinna avslutas snyggt vid rollout.
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
+      terminationGracePeriodSeconds: 60

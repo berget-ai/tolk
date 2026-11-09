@@ -1,0 +1,14 @@
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tolk-tls
+  namespace: tolk
+spec:
+  secretName: tolk-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: "tolk.berget.ai"
+  dnsNames:
+    - "tolk.berget.ai"
