@@ -209,6 +209,7 @@ microphone → broadcast page (PCM 24k) ──ws──▶ server ──ws (OpenA
 | `public/listen.html` | Audience view (language picker, captions, wake lock) |
 | `public/theme.css` | Shared theme on `@bergetai/ui` tokens (dark) |
 | `public/pcm-worklet.js` | AudioWorklet: resampling to 24 kHz mono 16-bit PCM |
+| `watch/` | Apple Watch app – klockans mikrofon som sändare + QR-kod (se `watch/README.md`) |
 
 ## Limitations / known choices
 
