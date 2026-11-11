@@ -14,8 +14,10 @@ struct StartView: View {
 
   var body: some View {
     VStack(spacing: 8) {
-      if let session {
-        LiveView(session: session)
+      if let current = session {
+        LiveView(session: current) {
+          self.session = nil   // "Färdig" – tillbaka till startskärmen/pickern
+        }
       } else {
         Picker("Källspråk", selection: $sourceLang) {
           ForEach(languages, id: \.code) { lang in

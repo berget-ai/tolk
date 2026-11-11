@@ -1,23 +1,24 @@
 # Tolk för Apple Watch
 
-Watch-app som gör klockan till en **resemikrofon för Tolk**: klockans mikrofon
+Watch-app som gör klockan till en **mikrofon och sändare för Tolk**: klockans mikrofon
 strömmas till Tolk-servern och QR-koden på skärmen skannas av telefonen (eller
 publikens telefoner) för att läsa captions i sitt språk. Ingen iPhone-app
 krävs för sändningen – klockan hanterar allt själv.
 
 ```
-watch-mikrofon → AVAudioEngine → AVAudioConverter (24 kHz mono int16)
+resep-mikrofon → AVAudioConverter (24 kHz mono int16)
    → URLSessionWebSocketTask → wss://tolk.berget.ai/ws/broadcast?id=CODE
         └─ servern (samma pipeline som /live-sidan): klang/pianissimo →
            renskrivning → översättning → captions
 ```
 
 Protokollet är detsamma som webbläsarens AudioWorklet (`public/pcm-worklet.js`):
-base64-kodade {type: "audio", audio: …}-meddelanden à ~200 ms, och serverns
-`state`-meddelanden (idle/connecting/ready/error) visas som statusrad. Raden
-med senaste transkriberade texten visas underst på klockan så presentatören
-ser att kedjan lever. Om servern startar om återansluter appen och sessionen
-återskapas automatiskt på samma rumskod (se "Reusable room codes" i huvud-README:n).
+base64-kodade `{type: "audio", audio: …}`-meddelanden à ~200 ms. Serverns
+`state`-meddelanden (idle/connecting/ready/error) visas som statusrad, och
+raden med senaste transkriberade texten visas underst på klockan så
+presentatören ser att kedjan lever. **Serveromstart**: WS:n återansluter
+automatiskt med samma rumskod varannan sekund – servern återskapar sessionen
+på koden (se "Reusable room codes" i huvud-README:n) och sändningen fortsätter.
 
 ## Öppna och köra
 

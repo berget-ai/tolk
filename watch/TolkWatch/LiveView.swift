@@ -2,16 +2,21 @@ import AVFoundation
 import SwiftUI
 
 /// Liveskärmen: QR-kod att skanna med telefonen, rumskod att slå in för hand,
-/// status från servern och stoppknapp.
+/// status från servern och stoppknapp. När sändningen stannat (av dig eller
+/// av ett fel) visas "Färdig" som återgår till startskärmen.
 struct LiveView: View {
   let session: TolkSession
+  /// Anropas när sändningen är avslutad och UI:t ska återgå till startskärmen.
+  var onDone: (() -> Void)?
 
   @State private var streamer = MicStreamer()
   @State private var status = "Ansluter…"
   @State private var listeners: Int?
   @State private var live = false
+  @State private var ended = false
   @State private var appError: String?
   @State private var captionText: String?
+  @State private var phase = MicStreamer.Phase.idle
 
   var body: some View {
     ScrollView {
@@ -40,12 +45,21 @@ struct LiveView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
 
-        Button(role: .destructive) {
-          stop()
-        } label: {
-          Label("Stoppa", systemImage: "stop.fill")
+        if ended {
+          Button {
+            onDone?()
+          } label: {
+            Label("Färdig", systemImage: "checkmark")
+          }
+          .tint(.blue)
+        } else {
+          Button(role: .destructive) {
+            stop()
+          } label: {
+            Label("Stoppa", systemImage: "stop.fill")
+          }
+          .tint(.red)
         }
-        .tint(.red)
 
         if let appError {
           Text(appError).font(.caption2).foregroundStyle(.red)
@@ -53,13 +67,13 @@ struct LiveView: View {
       }
     }
     .onAppear { startStreaming() }
-    .onDisappear { stop() }
+    .onDisappear { streamer.stop() }
   }
 
   private var statusRow: some View {
     HStack(spacing: 4) {
       Circle()
-        .fill(live ? Color.green : Color.orange)
+        .fill(statusColor)
         .frame(width: 8, height: 8)
       Text(status).font(.caption2)
       if let listeners, listeners > 0 {
@@ -70,32 +84,51 @@ struct LiveView: View {
     }
   }
 
+  private var statusColor: Color {
+    switch phase {
+    case .streaming: return .green
+    case .reconnecting: return .orange
+    case .failed: return .red
+    default: return ended ? .red : .orange
+    }
+  }
+
   private func startStreaming() {
-    streamer.onPhase = { phase in
-      switch phase {
+    streamer.onPhase = { newPhase in
+      phase = newPhase
+      switch newPhase {
       case .idle: break
       case .micPermission: status = "Ber om mikrofon…"
       case .engineStarting: status = "Startar mikrofon…"
       case .streaming:
         live = true
         status = "Sänder ✓"
+      case .reconnecting:
+        status = "Återansluter…"
       case .failed(let msg):
         appError = msg
-        live = false
-        status = "Stoppad"
+        endSession()
       }
     }
     // Servern skickar partial/final till broadcast-WS:n – visa senaste raden
-    // så kan presentatören verifiera att kedjan lever utan öppna telefonen.
+    // så presentatören ser att kedjan lever utan öppnad telefon.
     streamer.onCaption = { text in
       captionText = text
+    }
+    streamer.onListeners = { count in
+      listeners = count
     }
     streamer.start(wsURL: TolkAPI.broadcastURL(id: session.id))
   }
 
   private func stop() {
     streamer.stop()
-    live = false
+    endSession()
     status = "Stoppad av dig"
+  }
+
+  private func endSession() {
+    live = false
+    ended = true
   }
 }

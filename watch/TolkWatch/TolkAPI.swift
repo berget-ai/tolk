@@ -24,11 +24,15 @@ struct TolkSession: Decodable {
 enum TolkError: LocalizedError {
   case badStatus(Int)
   case badResponse
+  case audioSetup(String)
+  case serverDown
 
   var errorDescription: String? {
     switch self {
     case .badStatus(let code): return "Servern svarade \(code)"
     case .badResponse: return "Oväntat svar från servern"
+    case .audioSetup(let detail): return "Kan inte använda mikrofonen (\(detail))"
+    case .serverDown: return "Kan inte nå \(TolkConfig.baseURL.host ?? "servern")"
     }
   }
 }

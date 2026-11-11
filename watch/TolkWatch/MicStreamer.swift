@@ -4,70 +4,86 @@ import Foundation
 /// Läser mikrofonen kontinuerligt och strömmar 24 kHz mono 16-bit PCM i
 /// base64-JSON till servern — samma protokoll som webbläsarens AudioWorklet
 /// (public/pcm-worklet.js → /ws/broadcast).
+///
+/// Trådmodell: ljudkonverteringen körs på `queue`; allt som rör WS-svaren,
+/// fasändringar och callbacks körs på main (UI kan fritt läsa fasen).
 final class MicStreamer: ObservableObject {
   enum Phase: Equatable {
     case idle
     case micPermission
     case engineStarting
     case streaming
+    /// WS:n tappades – appen återansluter i bakgrunden till samma kod.
+    case reconnecting
     case failed(String)
   }
 
-  @Published private(set) var phase: Phase = .idle {
-    didSet { onPhase?(phase) }
-  }
-
-  /// Vidarebefordrar fasändringar till UI:t (setts av SessionModel).
   var onPhase: ((Phase) -> Void)?
-
-  /// Senaste caption-raden (partial/final) från servern – för en liten
-  /// förhandsvisning på klockan.
+  /// Senaste caption-raden (partial/final) från servern.
   var onCaption: ((String) -> Void)?
+  /// Antal lyssnare ur serverns state-meddelanden.
+  var onListeners: ((Int) -> Void)?
+
+  /// Fas ägs på main – läs den bara från main (UI och callbacks).
+  var phase: Phase = .idle
 
   private let engine = AVAudioEngine()
   private let queue = DispatchQueue(label: "ai.berget.tolk.mic")
-  private lazy var session = URLSession(configuration: .default)
+  private let session = URLSession(configuration: .default)
 
+  private var wsURL: URL?
   private var task: URLSessionWebSocketTask?
   private var converter: AVAudioConverter?
   private var targetFormat: AVAudioFormat?
   private var nativeRate: Double = 0
-  private var pending = Data()   // int16-samplets little-endian, okickade
+  private var pending = Data()   // int16-samplar little-endian, okickade
   private var pendingFrames = 0
+  /// Faktiskt sändande pågår. Bara läs/skriv från main; ljudkön läser den
+  /// best-effort (en missad runda skippar bara ~200 ms ljud).
   private var running = false
 
-  func start(wsURL: URL) {
+  // ---- Livscykel ------------------------------------------------------------
+
+  func start(wsURL url: URL) {
+    wsURL = url
     running = true
-    phase = .micPermission
+    setPhase(.micPermission)
     requestMicPermission { [weak self] granted in
-      guard let self else { return }
+      guard let self, self.running else { return }
       guard granted else {
-        self.phase = .failed("Mikrofonbehörighet nekades – aktivera i Inställningar.")
+        self.setPhase(.failed("Mikrofonbehörighet nekades – aktivera i Inställningar."))
         return
       }
-      self.phase = .engineStarting
+      self.setPhase(.engineStarting)
       do {
-        try self.configureSession()
-        try self.startEngine(wsURL: wsURL)
-        self.phase = .streaming
+        try self.configureAudioSession()
+        try self.startEngine()
+        self.setPhase(.streaming)
       } catch {
-        self.phase = .failed("Mikrofonfel: \(error.localizedDescription)")
+        self.setPhase(.failed("Mikrofonfel: \(error.localizedDescription)"))
       }
     }
   }
 
   func stop() {
     running = false
-    queue.async { [weak self] in
-      guard let self else { return }
-      self.engine.inputNode.removeTap(onBus: 0)
-      self.engine.stop()
-      self.task?.cancel(with: .normalClosure, reason: nil)
-      self.task = nil
-      self.pending = Data()
-      self.pendingFrames = 0
+    queue.sync {
+      engine.inputNode.removeTap(onBus: 0)
+      engine.stop()
+      pending = Data()
+      pendingFrames = 0
     }
-    phase = .idle
+    task?.cancel(with: .normalClosure, reason: nil)
+    task = nil
+    setPhase(.idle)
+  }
+
+  private func setPhase(_ newPhase: Phase) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.phase = newPhase
+      self.onPhase?(newPhase)
+    }
   }
 
   // ---- Behörighet -----------------------------------------------------------
@@ -81,25 +97,28 @@ final class MicStreamer: ObservableObject {
   }
 
   /// watchOS vill ha kategorin .record innan inputNode:n matas.
-  private func configureSession() throws {
-    let session = AVAudioSession.sharedInstance()
-    try session.setCategory(.record, mode: .measurement)
-    try session.setActive(true)
+  private func configureAudioSession() throws {
+    let audioSession = AVAudioSession.sharedInstance()
+    try audioSession.setCategory(.record, mode: .measurement)
+    try audioSession.setActive(true)
   }
 
   // ---- Motor + tap ----------------------------------------------------------
 
-  private func startEngine(wsURL: URL) throws {
+  private func startEngine() throws {
+    guard let wsURL else { return }
     let input = engine.inputNode
     let native = input.outputFormat(forBus: 0)
-    guard native.sampleRate > 0 else { throw TolkError.badResponse }
+    guard native.sampleRate > 0 else {
+      throw TolkError.audioSetup("mikrofonformatet saknas")
+    }
     guard let target = AVAudioFormat(
       commonFormat: .pcmFormatFloat32,
       sampleRate: Self.targetRate,
       channels: 1,
       interleaved: false
     ), let conv = AVAudioConverter(from: native, to: target) else {
-      throw TolkError.badResponse
+      throw TolkError.audioSetup("24 kHz-konverteraren kunde inte byggas")
     }
     targetFormat = target
     converter = conv
@@ -107,8 +126,8 @@ final class MicStreamer: ObservableObject {
 
     let ws = session.webSocketTask(with: wsURL)
     task = ws
-    receiveState()
     ws.resume()
+    receiveState()
 
     try engine.start()
     input.installTap(onBus: 0, bufferSize: 4096, format: native) { [weak self] buffer, _ in
@@ -148,53 +167,100 @@ final class MicStreamer: ObservableObject {
     if pendingFrames >= TolkConfig.chunkFrames, let task { sendChunk(task: task) }
   }
 
-  /// ~200 ms ljud per meddelande, som {type:"audio", audio:<base64>} URL-nedan.
+  /// ~200 ms ljud per meddelande, som {type:"audio", audio:<base64>}.
+  /// Körs på ljudkön; completionen kan landa efter stop() – där är tappade
+  /// sändningar förväntade och får inte visa fel.
   private func sendChunk(task: URLSessionWebSocketTask) {
-    let chunk = pending
+    let payload = pending
     pending = Data()
     pendingFrames = 0
-    let json = ["type": "audio", "audio": chunk.base64EncodedString()]
+    let json = ["type": "audio", "audio": payload.base64EncodedString()]
     guard JSONSerialization.isValidJSONObject(json),
           let data = try? JSONSerialization.data(withJSONObject: json),
           let text = String(data: data, encoding: .utf8) else { return }
     task.send(.string(text)) { [weak self] err in
-      if err != nil { self?.phase = .failed("Sändningen tappades – stoppa och starta igen.") }
+      guard let self, self.running, err != nil else { return }
+      // Servern kan ha startat om – återanslut, koden lever kvar (lazy-claim).
+      self.scheduleReconnect()
     }
   }
 
-  // ---- Serverns state-meddelanden (idle/connecting/ready/error) ------------
+  // ---- Servermeddelanden + återanslutning ----------------------------------
 
   private func receiveState() {
     task?.receive { [weak self] result in
-      guard let self else { return }
-      switch result {
-      case .failure(let err):
-        if self.running { self.phase = .failed("Anslutningen tappades: \(err.localizedDescription)") }
-      case .success(let msg):
-        if case .string(let text) = msg,
-           let data = text.data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-          switch obj["type"] as? String {
-          case "state":
-            if let state = obj["state"] as? String {
-              switch state {
-              case "error":
-                self.phase = .failed(obj["error"] as? String ?? "Transkriberingsfel")
-                self.engine.inputNode.removeTap(onBus: 0)
-                self.engine.stop()
-              default:
-                if self.phase != .streaming { self.phase = .streaming }
-              }
-            }
-          case "partial":
-            if let text = obj["text"] as? String { self.onCaption?(text) }
-          case "final":
-            if let text = obj["text"] as? String { self.onCaption?(text) }
-          default:
-            break
-          }
+      guard let self = self else { return }
+      DispatchQueue.main.async {
+        guard self.running else { return }
+        self.handleReceive(result)
+      }
+    }
+  }
+
+  /// På main.
+  private func handleReceive(_ result: Result<URLSessionWebSocketTask.Message, Error>) {
+    switch result {
+    case .failure:
+      // WS:n dog (serveromstart, nätbyte). Återanvänd koden: lazy-claim återskapar.
+      scheduleReconnect()
+    case .success(let msg):
+      guard case .string(let text) = msg,
+            let data = text.data(using: .utf8),
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        receiveState()   // oväntat format – hoppa över och vänta på nästa
+        return
+      }
+      handleServerMessage(obj)
+      if running { receiveState() }
+    }
+  }
+
+  /// På main.
+  private func handleServerMessage(_ obj: [String: Any]) {
+    switch obj["type"] as? String {
+    case "state":
+      if let state = obj["state"] as? String {
+        switch state {
+        case "error":
+          stopAudioFacilities()
+          setPhase(.failed(obj["error"] as? String ?? "Transkriberingsfel"))
+        default:
+          if case .failed = phase { break }   // fel är sticky – inte slås tillbaka till streaming av senare state-meddelanden
+          if phase != .streaming { setPhase(.streaming) }
         }
-        if self.running { self.receiveState() }
+      }
+      if let listeners = obj["listeners"] as? Int { onListeners?(listeners) }
+    case "partial", "final":
+      if let text = obj["text"] as? String { onCaption?(text) }
+    case "error":
+      // T.ex. "The stream is busy" när en annan sändare äger rummet.
+      setPhase(.failed(obj["message"] as? String ?? "Avvisad av servern"))
+    default:
+      break
+    }
+  }
+
+  private func stopAudioFacilities() {
+    queue.async { [weak self] in
+      self?.engine.inputNode.removeTap(onBus: 0)
+      self?.engine.stop()
+    }
+  }
+
+  /// Förbinder på nytt med SAMMA rumskod: servern återskapar sessionen
+  /// automatiskt (claimSession) så sändningen överlever omstarter.
+  private func scheduleReconnect() {
+    guard running else { return }
+    setPhase(.reconnecting)
+    task?.cancel(with: .goingAway, reason: nil)
+    task = nil
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+      guard let self, self.running, self.wsURL != nil else { return }
+      do {
+        try self.startEngine()
+        self.setPhase(.streaming)
+      } catch {
+        self.setPhase(.failed("Kunde inte återansluta: \(error.localizedDescription)"))
       }
     }
   }
